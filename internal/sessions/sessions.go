@@ -20,6 +20,8 @@ import (
 // both.
 type Info struct {
 	screen.Session
+	// Host is the configured name of the machine the session runs on, empty for this machine.
+	Host     string         `json:"host,omitempty"`
 	Agent    *state.Record  `json:"agent,omitempty"`
 	Detected *detect.Result `json:"detected,omitempty"`
 	Status   state.Status   `json:"status,omitempty"`
@@ -185,15 +187,26 @@ func resolve(info *Info, d *detect.Result) {
 	}
 }
 
-// Sort orders sessions by Rank, then by ID.
+// Sort orders sessions by Rank, then by host (this machine first) and ID.
 func Sort(infos []Info) {
 	sort.SliceStable(infos, func(i, j int) bool {
 		ri, rj := Rank(infos[i]), Rank(infos[j])
 		if ri != rj {
 			return ri < rj
 		}
+		if infos[i].Host != infos[j].Host {
+			return infos[i].Host < infos[j].Host
+		}
 		return infos[i].ID < infos[j].ID
 	})
+}
+
+// Key identifies a session across hosts: "host:ID", or the ID alone on this machine.
+func (i Info) Key() string {
+	if i.Host == "" {
+		return i.ID
+	}
+	return i.Host + ":" + i.ID
 }
 
 // Rank orders sessions: waiting agents first, then working, idle, other agents, and plain

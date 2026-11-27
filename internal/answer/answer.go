@@ -43,12 +43,12 @@ var (
 
 // Dialog is a dialog as the screen shows it.
 type Dialog struct {
-	Question string
-	Options  []string
+	Question string   `json:"question,omitempty"`
+	Options  []string `json:"options"`
 	// Fingerprint identifies the screen the dialog was read from. A waiting dialog does not
 	// change, so the same fingerprint means the same dialog, even if two dialogs ask the same
 	// question with the same choices.
-	Fingerprint string
+	Fingerprint string `json:"fingerprint"`
 }
 
 // Choices lists the choices with their numbers, for messages.
