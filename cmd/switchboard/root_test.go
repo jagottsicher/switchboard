@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -31,5 +32,27 @@ func TestProgName(t *testing.T) {
 		if got := progName(arg0); got != want {
 			t.Errorf("progName(%q) = %q, want %q", arg0, got, want)
 		}
+	}
+}
+
+func TestRootWithoutTerminalDoesNotStartTUI(t *testing.T) {
+	origTUI, origTerm := runTUI, isTerminal
+	t.Cleanup(func() { runTUI, isTerminal = origTUI, origTerm })
+	started := false
+	runTUI = func() error { started = true; return nil }
+	isTerminal = func(*os.File) bool { return false }
+	cmd := newRootCmd()
+	cmd.SetArgs(nil)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "needs a terminal") {
+		t.Errorf("Execute() = %v", err)
+	}
+	if started {
+		t.Error("TUI started without a terminal")
+	}
+	isTerminal = func(*os.File) bool { return true }
+	if err := cmd.Execute(); err != nil || !started {
+		t.Errorf("Execute() on a terminal = %v, started = %v", err, started)
 	}
 }

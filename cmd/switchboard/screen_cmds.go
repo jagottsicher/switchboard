@@ -7,114 +7,17 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jagottsicher/switchboard/internal/screen"
+	"github.com/jagottsicher/switchboard/internal/sessions"
 	"github.com/jagottsicher/switchboard/internal/state"
 )
-
-// sessionInfo combines a screen session with what switchboard knows about its agent.
-type sessionInfo struct {
-	screen.Session
-	Agent  *state.Record `json:"agent,omitempty"`
-	Status state.Status  `json:"status,omitempty"`
-}
-
-// collectSessions lists the screen sessions together with their stored state, sorted so that
-// sessions needing attention come first. Records of sessions that no longer exist are removed.
-func collectSessions() ([]sessionInfo, error) {
-	sessions, err := screen.List()
-	if err != nil {
-		return nil, err
-	}
-	store, err := state.Open("")
-	if err != nil {
-		return nil, err
-	}
-	records, err := store.All()
-	if err != nil {
-		return nil, err
-	}
-	alive := map[string]bool{}
-	infos := make([]sessionInfo, 0, len(sessions))
-	for _, s := range sessions {
-		alive[s.ID] = true
-		info := sessionInfo{Session: s}
-		if rec, ok := records[s.ID]; ok {
-			info.Agent = &rec
-			info.Status = rec.Status
-		}
-		if s.State == screen.StateDead {
-			info.Status = state.StatusExited
-		}
-		infos = append(infos, info)
-	}
-	// Pruning only follows a successful screen -ls, so a broken screen setup never wipes state.
-	if err := store.Prune(alive); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: cleaning up old state:", err)
-	}
-	sort.SliceStable(infos, func(i, j int) bool {
-		pi, pj := statusRank(infos[i]), statusRank(infos[j])
-		if pi != pj {
-			return pi < pj
-		}
-		return infos[i].ID < infos[j].ID
-	})
-	return infos, nil
-}
-
-// statusRank orders sessions: waiting agents first, then working, idle, other agents, and plain
-// screen sessions last.
-func statusRank(s sessionInfo) int {
-	if s.Agent == nil || !s.Agent.Agent {
-		return 9
-	}
-	switch s.Status {
-	case state.StatusWaiting:
-		return 0
-	case state.StatusWorking:
-		return 1
-	case state.StatusIdle:
-		return 2
-	case state.StatusUnknown:
-		return 3
-	}
-	return 4
-}
-
-// age formats the time since t compactly, e.g. "45s", "12m", "3h", "2d".
-func age(t time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 48*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}
-
-// shorten cuts s to at most n characters and keeps it on one line.
-func shorten(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
-}
 
 func newListCmd() *cobra.Command {
 	var asJSON, agentsOnly bool
@@ -123,14 +26,21 @@ func newListCmd() *cobra.Command {
 		Short: "List screen sessions with the status of their agents",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			infos, err := collectSessions()
+			store, err := state.Open("")
 			if err != nil {
 				return err
+			}
+			infos, warn, err := sessions.Collect(store, true)
+			if err != nil {
+				return err
+			}
+			if warn != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warn)
 			}
 			if agentsOnly {
 				filtered := infos[:0]
 				for _, s := range infos {
-					if s.Agent != nil && s.Agent.Agent {
+					if s.IsAgent() {
 						filtered = append(filtered, s)
 					}
 				}
@@ -156,8 +66,8 @@ func newListCmd() *cobra.Command {
 				status, since, msg := "-", "-", ""
 				if s.Agent != nil {
 					status = string(s.Status)
-					since = age(s.Agent.UpdatedAt)
-					msg = shorten(s.Agent.Message, 60)
+					since = sessions.Age(s.Agent.UpdatedAt)
+					msg = sessions.Shorten(s.Agent.Message, 60)
 				} else if s.Status != "" {
 					status = string(s.Status)
 				}
