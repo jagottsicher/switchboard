@@ -137,7 +137,8 @@ permission, question or trust dialog) and idle (the input line). For a waiting a
 question of the dialog becomes the message. This covers what hooks cannot report: after an
 interrupt with Esc or a denied permission, the agent sends no further event, but the screen
 shows the input line again. It also finds agents in sessions that have no hooks and were not
-started with `switchboard new`.
+started with `switchboard new`. While one of the agent's menus is open, such as `/config` or
+`/model`, the status is unknown, because these menus can be opened while the agent works.
 
 A hook event less than five seconds old takes precedence over the screen, because the screen
 lags behind; after that, a recognized screen wins. If the screen is not recognized, the status
@@ -154,6 +155,11 @@ tested with Claude Code 2.1; other versions may need adjustments.
 - The overview shows screens through the same hardcopy, with the same limits.
 - The status from the screen only covers Claude Code so far. Other agents report through
   `switchboard notify`.
+- Without hooks, switchboard does not know which window of a session runs the agent and reads
+  window 0.
+- The choices of a dialog depend on the dialog: "No" is option 3 when creating a file but
+  option 4 for a shell command. The trust dialog has no numbers and preselects "No, exit", so a
+  bare Enter quits the agent. Keep this in mind when you answer dialogs with `send`.
 
 ## Roadmap
 

@@ -42,6 +42,12 @@ func TestClaudeCodeFixtures(t *testing.T) {
 		{"denied", state.StatusIdle, "", nil},
 		{"interrupted", state.StatusIdle, "", nil},
 		{"question-declined", state.StatusIdle, "", nil},
+		{"permission-narrow", state.StatusWaiting, "Do you want to create sb-detect-probe.txt?",
+			[]string{"Yes", "Yes, and switch to accept edits", "No"}},
+		{"permission-bash", state.StatusWaiting, "Do you want to proceed?",
+			[]string{"Yes", "Yes, and always allow access to", "Yes, and switch to auto mode · auto mode handles these prompts for you", "No"}},
+		{"menu-config", state.StatusUnknown, "", nil},
+		{"menu-permissions", state.StatusUnknown, "", nil},
 		{"utf8-idle", state.StatusIdle, "", nil},
 		{"utf8-working", state.StatusWorking, "", nil},
 		{"utf8-permission", state.StatusWaiting, "Do you want to create sb-detect-probe.txt?",
@@ -110,5 +116,26 @@ func TestSecondhandAgentScreensAreNotRecognized(t *testing.T) {
 				t.Errorf("%s followed by %s: recognized as %+v", name, follow, got)
 			}
 		}
+	}
+}
+
+func TestDialogJoinsWrappedQuestions(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"wrapped", []string{" ────", " Do you want to", " create x.txt?", " ❯ 1. Yes", "   2. No"}, "Do you want to create x.txt?"},
+		{"stops at a sentence", []string{" Done.", " Do you want to", " create x.txt?", " ❯ 1. Yes", "   2. No"}, "Do you want to create x.txt?"},
+		{"stops at other indentation", []string{"  Bash command", " Do you want to proceed?", " ❯ 1. Yes", "   2. No"}, "Do you want to proceed?"},
+		{"stops at control characters", []string{" \x10 Drink", " Tea or coffee?", " ❯ 1. Tea", "   2. Coffee"}, "Tea or coffee?"},
+		{"at most three lines", []string{" a", " b", " c", " d", " e?", " ❯ 1. Yes", "   2. No"}, "b c d e?"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, _ := dialog(tt.lines); got != tt.want {
+				t.Errorf("question = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

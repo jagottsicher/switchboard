@@ -1,0 +1,15 @@
+ Bash command
+ Tip: auto mode handles these prompts for you  choose "switch to auto mode"
+ below
+ Create empty file sb-detect-probe.txt in current directory
+LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL
+ touch sb-detect-probe.txt
+LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL
+ Do you want to proceed?
+ o 1. Yes
+   2. Yes, and always allow access to
+      /home/user/project from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend
