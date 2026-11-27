@@ -159,7 +159,8 @@ tested with Claude Code 2.1; other versions may need adjustments.
   window 0.
 - The choices of a dialog depend on the dialog: "No" is option 3 when creating a file but
   option 4 for a shell command. The trust dialog has no numbers and preselects "No, exit", so a
-  bare Enter quits the agent. Keep this in mind when you answer dialogs with `send`.
+  bare Enter quits the agent. A digit picks its choice at once, without confirmation. To answer
+  a dialog by hand, check its choices with `peek` first and use `send --no-enter`.
 
 ## Roadmap
 

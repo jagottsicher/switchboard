@@ -139,3 +139,23 @@ func TestDialogJoinsWrappedQuestions(t *testing.T) {
 		})
 	}
 }
+
+func TestPermissionWithUnreadableChoicesIsWaiting(t *testing.T) {
+	lines := []string{
+		" Do you want to",
+		" create x.txt?",
+		" ❯ 1. Yes",
+		"   2. Yes, and",
+		"      switch to",
+		"      accept edits",
+		"      (auto-approve",
+		"      file edits)",
+		"   3. No",
+		"",
+		" Esc to cancel · Tab to amend",
+	}
+	got, ok := Detect(lines)
+	if !ok || got.Status != state.StatusWaiting {
+		t.Errorf("Detect() = %+v, %v, want waiting", got, ok)
+	}
+}

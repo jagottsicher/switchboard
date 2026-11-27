@@ -8,7 +8,9 @@ import (
 
 // Claude Code shows an input line that starts with "❯" and a no-break space, with a footer
 // below it. While it works, the footer says "esc to interrupt". A dialog (permission, question,
-// trust) replaces input line and footer and ends with a line that offers "Esc to cancel".
+// trust) replaces input line and footer and ends with a line that offers "Esc to cancel". A
+// permission dialog also offers "Tab to amend", which identifies it even when a very narrow
+// window wraps its choices beyond recognition.
 //
 // A hardcopy of screen 4.09 turns "❯" into "o", so the input line starts with "o" and a no-break
 // space. Lines of the transcript start with "❯" or "o" and a normal space, and shell prompts
@@ -53,7 +55,8 @@ func claudeCode(lines []string) (Result, bool) {
 	if strings.Contains(last, "Esc to cancel") {
 		question, options := dialog(tail[:len(tail)-1])
 		if (question != "" && len(options) >= 2) ||
-			strings.Contains(last, "Enter to confirm") || strings.Contains(last, "Enter to select") {
+			strings.Contains(last, "Enter to confirm") || strings.Contains(last, "Enter to select") ||
+			strings.Contains(last, "Tab to amend") {
 			return Result{Agent: claudeCodeName, Status: state.StatusWaiting, Question: question, Options: options}, true
 		}
 	}
