@@ -116,7 +116,7 @@ func TestPruneRemovesOnlyGoneSessions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.Prune(map[string]bool{"1.alive": true}); err != nil {
+	if err := s.Prune(map[string]bool{"1.alive": true}, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	all, _ := s.All()
@@ -155,5 +155,28 @@ func TestParseStatus(t *testing.T) {
 	}
 	if _, err := ParseStatus("busy"); err == nil {
 		t.Error("ParseStatus(busy) should fail")
+	}
+}
+
+func TestPruneKeepsRecordsNewerThanTheListing(t *testing.T) {
+	listed := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixedNow(t, listed.Add(-time.Second))
+	if _, err := s.Update("1.old", func(*Record) {}); err != nil {
+		t.Fatal(err)
+	}
+	fixedNow(t, listed.Add(time.Second))
+	if _, err := s.Update("2.new", func(*Record) {}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Prune(map[string]bool{}, listed); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := s.All()
+	if _, ok := all["2.new"]; !ok || len(all) != 1 {
+		t.Errorf("after Prune: %v", all)
 	}
 }

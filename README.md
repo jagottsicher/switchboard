@@ -13,9 +13,9 @@ need a daemon.
 
 ## Status
 
-Early development. The commands below work, including agent status from hooks. Status
-detection from the screen contents, the TUI and multi-host support are not implemented yet (see
-[Roadmap](#roadmap)).
+Early development. The interactive overview and the commands below work, including agent status
+from hooks. Status detection from the screen contents and multi-host support are not implemented
+yet (see [Roadmap](#roadmap)).
 
 ## Requirements
 
@@ -48,6 +48,29 @@ The link follows the binary, so rebuilding or reinstalling switchboard updates `
 Packages, once there are any, will install `swb` as a link.
 
 ## Usage
+
+### Interactive overview
+
+Run `switchboard` (or `swb`) without a command to open the overview. The upper part lists all
+screen sessions, with agents that wait for input at the top. The lower part shows the screen of
+the selected session and follows it live. The overview refreshes every two seconds.
+
+| Key | Action |
+|---|---|
+| `↑`/`↓`, `k`/`j`, `g`/`G` | Select a session |
+| `enter` | Attach with `screen -x`; detach with `Ctrl-a d` to come back to the overview |
+| `s` | Type a line and send it to the selected session with Enter; an empty line sends only Enter |
+| `/` | Filter by session name, status, directory or message; `esc` clears the filter |
+| `a` | Show only agents, or all sessions |
+| `r` | Refresh now |
+| `q` | Quit |
+
+If switchboard itself runs inside screen, the session it runs in is marked `(here)` and cannot be
+attached. From an attached session you come back with `Ctrl-a a d`, because the first `Ctrl-a`
+goes to the outer screen. Over ssh, start the overview with `ssh -t host switchboard`; without a
+terminal it exits with an error.
+
+### Commands
 
 ```sh
 switchboard list [-a] [--json]                 # sessions with agent status; -a: agents only
@@ -111,6 +134,7 @@ switchboard there.
   characters and other symbols outside Latin-1 are shown garbled.
 - `send` escapes the characters screen interprets (`\`, `^`, `$`) and splits long text into
   chunks, because screen silently drops `stuff` arguments longer than about 760 bytes.
+- The overview shows screens through the same hardcopy, with the same limits.
 - When you interrupt an agent with Esc or deny a permission, the agent sends no final event, so
   its status may stay at `working` or `waiting`. Detecting this from the screen contents is
   planned.
@@ -118,9 +142,8 @@ switchboard there.
 ## Roadmap
 
 1. A fallback that derives the agent status from the screen contents.
-2. A terminal UI with a live overview, peek, send and attach.
-3. Several hosts in one overview via ssh.
-4. Controlled access for other developers to shared sessions.
+2. Several hosts in one overview via ssh.
+3. Controlled access for other developers to shared sessions.
 
 ## Security
 

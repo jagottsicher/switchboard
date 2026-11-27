@@ -231,15 +231,17 @@ func (s *Store) All() (map[string]Record, error) {
 }
 
 // Prune removes records, locks and event logs of sessions that are not in alive. Call it only
-// with the result of a successful `screen -ls`.
-func (s *Store) Prune(alive map[string]bool) error {
+// with the result of a successful `screen -ls`. Records updated at or after before are kept: a
+// session started after that listing may already have reported. A zero before prunes all
+// records of sessions that are not alive.
+func (s *Store) Prune(alive map[string]bool, before time.Time) error {
 	recs, err := s.All()
 	if err != nil {
 		return err
 	}
 	var errs []error
-	for session := range recs {
-		if alive[session] {
+	for session, rec := range recs {
+		if alive[session] || (!before.IsZero() && !rec.UpdatedAt.Before(before)) {
 			continue
 		}
 		for _, p := range []string{s.recordPath(session), s.lockPath(session), s.eventsPath(session), s.eventsPath(session) + ".1"} {
