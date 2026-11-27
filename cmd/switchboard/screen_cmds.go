@@ -7,53 +7,188 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jagottsicher/switchboard/internal/screen"
+	"github.com/jagottsicher/switchboard/internal/state"
 )
 
+// sessionInfo combines a screen session with what switchboard knows about its agent.
+type sessionInfo struct {
+	screen.Session
+	Agent  *state.Record `json:"agent,omitempty"`
+	Status state.Status  `json:"status,omitempty"`
+}
+
+// collectSessions lists the screen sessions together with their stored state, sorted so that
+// sessions needing attention come first. Records of sessions that no longer exist are removed.
+func collectSessions() ([]sessionInfo, error) {
+	sessions, err := screen.List()
+	if err != nil {
+		return nil, err
+	}
+	store, err := state.Open("")
+	if err != nil {
+		return nil, err
+	}
+	records, err := store.All()
+	if err != nil {
+		return nil, err
+	}
+	alive := map[string]bool{}
+	infos := make([]sessionInfo, 0, len(sessions))
+	for _, s := range sessions {
+		alive[s.ID] = true
+		info := sessionInfo{Session: s}
+		if rec, ok := records[s.ID]; ok {
+			info.Agent = &rec
+			info.Status = rec.Status
+		}
+		if s.State == screen.StateDead {
+			info.Status = state.StatusExited
+		}
+		infos = append(infos, info)
+	}
+	// Pruning only follows a successful screen -ls, so a broken screen setup never wipes state.
+	if err := store.Prune(alive); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: cleaning up old state:", err)
+	}
+	sort.SliceStable(infos, func(i, j int) bool {
+		pi, pj := statusRank(infos[i]), statusRank(infos[j])
+		if pi != pj {
+			return pi < pj
+		}
+		return infos[i].ID < infos[j].ID
+	})
+	return infos, nil
+}
+
+// statusRank orders sessions: waiting agents first, then working, idle, other agents, and plain
+// screen sessions last.
+func statusRank(s sessionInfo) int {
+	if s.Agent == nil || !s.Agent.Agent {
+		return 9
+	}
+	switch s.Status {
+	case state.StatusWaiting:
+		return 0
+	case state.StatusWorking:
+		return 1
+	case state.StatusIdle:
+		return 2
+	case state.StatusUnknown:
+		return 3
+	}
+	return 4
+}
+
+// age formats the time since t compactly, e.g. "45s", "12m", "3h", "2d".
+func age(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// shorten cuts s to at most n characters and keeps it on one line.
+func shorten(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
 func newListCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, agentsOnly bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List screen sessions",
+		Short: "List screen sessions with the status of their agents",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			sessions, err := screen.List()
+			infos, err := collectSessions()
 			if err != nil {
 				return err
 			}
+			if agentsOnly {
+				filtered := infos[:0]
+				for _, s := range infos {
+					if s.Agent != nil && s.Agent.Agent {
+						filtered = append(filtered, s)
+					}
+				}
+				infos = filtered
+			}
 			out := cmd.OutOrStdout()
 			if asJSON {
-				if sessions == nil {
-					sessions = []screen.Session{}
-				}
 				enc := json.NewEncoder(out)
 				enc.SetIndent("", "  ")
-				return enc.Encode(sessions)
+				return enc.Encode(infos)
 			}
-			if len(sessions) == 0 {
+			if len(infos) == 0 {
 				fmt.Fprintln(out, "No screen sessions found.")
 				return nil
 			}
 			tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "SESSION\tSTATE")
-			for _, s := range sessions {
-				state := string(s.State)
+			fmt.Fprintln(tw, "SESSION\tSCREEN\tSTATUS\tAGE\tMESSAGE")
+			for _, s := range infos {
+				screenState := string(s.State)
 				if s.Multi {
-					state += " (multi)"
+					screenState += "/multi"
 				}
-				fmt.Fprintf(tw, "%s\t%s\n", s.ID, state)
+				status, since, msg := "-", "-", ""
+				if s.Agent != nil {
+					status = string(s.Status)
+					since = age(s.Agent.UpdatedAt)
+					msg = shorten(s.Agent.Message, 60)
+				} else if s.Status != "" {
+					status = string(s.Status)
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, screenState, status, since, msg)
 			}
 			return tw.Flush()
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	cmd.Flags().BoolVarP(&agentsOnly, "agents", "a", false, "show only sessions with agents")
 	return cmd
+}
+
+// findWithWindow resolves query to a session and picks the window: the --window flag if given,
+// otherwise the window an agent hook reported, otherwise window 0.
+func findWithWindow(cmd *cobra.Command, query string, flagWindow int) (screen.Session, int, error) {
+	s, err := screen.Find(query)
+	if err != nil {
+		return s, 0, err
+	}
+	if cmd.Flags().Changed("window") {
+		return s, flagWindow, nil
+	}
+	if store, err := state.Open(""); err == nil {
+		if rec, ok, _ := store.Get(s.ID); ok && rec.Window != "" {
+			if w, err := strconv.Atoi(rec.Window); err == nil {
+				return s, w, nil
+			}
+		}
+	}
+	return s, flagWindow, nil
 }
 
 func newPeekCmd() *cobra.Command {
@@ -63,7 +198,7 @@ func newPeekCmd() *cobra.Command {
 		Short: "Show the last screen lines of a session without attaching",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := screen.Find(args[0])
+			s, window, err := findWithWindow(cmd, args[0], window)
 			if err != nil {
 				return err
 			}
@@ -105,7 +240,7 @@ func newSendCmd() *cobra.Command {
 			if text == "" && noEnter {
 				return errors.New("nothing to send: no text and --no-enter")
 			}
-			s, err := screen.Find(args[0])
+			s, window, err := findWithWindow(cmd, args[0], window)
 			if err != nil {
 				return err
 			}
@@ -174,6 +309,23 @@ func newNewCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), s.ID)
+			// Mark the session as an agent. Update merges with a record that the agent's first
+			// hook may already have written.
+			store, err := state.Open("")
+			if err == nil {
+				_, err = store.Update(s.ID, func(r *state.Record) {
+					r.Agent = true
+					if r.Window == "" {
+						r.Window = "0"
+					}
+					if r.Cwd == "" {
+						r.Cwd = dir
+					}
+				})
+			}
+			if err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: could not mark the session as an agent:", err)
+			}
 			return nil
 		},
 	}
