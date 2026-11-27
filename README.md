@@ -32,6 +32,21 @@ go install github.com/jagottsicher/switchboard/cmd/switchboard@develop
 The binary ends up in `$(go env GOPATH)/bin`, usually `~/go/bin`. Make sure that directory is in
 your `PATH`.
 
+### Short name `swb`
+
+`swb` is the short name for switchboard. It is the same program: every command works the same
+way under both names, and the help shows the name you used. `go install` only creates
+`switchboard`, so add the short name yourself, either as a link next to the binary or as a shell
+alias:
+
+```sh
+ln -s "$(go env GOPATH)/bin/switchboard" "$(go env GOPATH)/bin/swb"   # works in scripts and over ssh
+alias swb=switchboard                                                 # interactive shells only
+```
+
+The link follows the binary, so rebuilding or reinstalling switchboard updates `swb` as well.
+Packages, once there are any, will install `swb` as a link.
+
 ## Usage
 
 ```sh
