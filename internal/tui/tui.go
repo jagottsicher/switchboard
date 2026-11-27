@@ -16,31 +16,67 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jagottsicher/switchboard/internal/answer"
+	"github.com/jagottsicher/switchboard/internal/config"
+	"github.com/jagottsicher/switchboard/internal/host"
 	"github.com/jagottsicher/switchboard/internal/screen"
 	"github.com/jagottsicher/switchboard/internal/sessions"
 	"github.com/jagottsicher/switchboard/internal/state"
 )
 
-// Calls into screen and the state store. They are package variables so that tests can replace
-// them; none of them runs inside Update.
+// registry holds the hosts of the overview by name; "" is this machine.
+var registry = map[string]host.Host{"": host.NewLocal()}
+
+func lookup(name string) (host.Host, error) {
+	if h, ok := registry[name]; ok {
+		return h, nil
+	}
+	return nil, fmt.Errorf("unknown host %q", name)
+}
+
+// Calls into the hosts. They are package variables so that tests can replace them; none of them
+// runs inside Update.
 var (
-	collect = func() ([]sessions.Info, error, error) {
-		store, err := state.Open("")
+	collect = func(hostName string) ([]sessions.Info, error, error) {
+		h, err := lookup(hostName)
 		if err != nil {
 			return nil, nil, err
 		}
-		infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true, Self: os.Getenv("STY")})
-		return infos, warn, err
+		return h.List()
 	}
-	hardcopy   = screen.Hardcopy
-	stuff      = screen.Stuff
-	readDialog = answer.Read
-	sendChoice = answer.Send
-	attachCmd  = func(id string) *exec.Cmd {
-		args := screen.AttachArgs(id)
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Env = screen.AttachEnv()
-		return cmd
+	hardcopy = func(hostName, id string, window int) ([]string, error) {
+		h, err := lookup(hostName)
+		if err != nil {
+			return nil, err
+		}
+		return h.Hardcopy(id, window, true)
+	}
+	stuff = func(hostName, id string, window int, text string, enter bool) error {
+		h, err := lookup(hostName)
+		if err != nil {
+			return err
+		}
+		return h.Stuff(id, window, text, enter)
+	}
+	readDialog = func(hostName, id string, window int) (answer.Dialog, error) {
+		h, err := lookup(hostName)
+		if err != nil {
+			return answer.Dialog{}, err
+		}
+		return h.ReadDialog(id, window)
+	}
+	sendChoice = func(hostName, id string, window, n int, label, fingerprint string) error {
+		h, err := lookup(hostName)
+		if err != nil {
+			return err
+		}
+		return h.SendChoice(id, window, n, label, fingerprint)
+	}
+	attachCmd = func(hostName, id string) *exec.Cmd {
+		h, err := lookup(hostName)
+		if err != nil {
+			return exec.Command("sh", "-c", "exit 1")
+		}
+		return h.AttachCmd(id)
 	}
 )
 
@@ -64,6 +100,7 @@ const (
 type (
 	tickMsg     struct{}
 	sessionsMsg struct {
+		host      string
 		infos     []sessions.Info
 		warn, err error
 	}
@@ -100,7 +137,7 @@ type (
 type Model struct {
 	all        []sessions.Info // as collected, sorted
 	visible    []sessions.Info // after the agents-only switch and the filter
-	selected   string          // ID of the selected session
+	selected   string          // key (HOST:ID) of the selected session
 	cursor     int
 	offset     int // first visible row of the list
 	agentsOnly bool
@@ -117,15 +154,18 @@ type Model struct {
 	answerDialog answer.Dialog
 	answerReady  bool
 
-	peekID    string
+	peekID    string // key of the session the view shows
 	peekLines []string
 	peekErr   error
 	peekSeq   int // number of the latest peek request; older answers are dropped
 	peekBusy  int // peek requests still running
 
-	loaded     bool
-	refreshing bool
-	listErr    error
+	hosts      []string                   // names of the hosts; "" is this machine
+	byHost     map[string][]sessions.Info // sessions as collected per host
+	hostErr    map[string]error           // hosts that could not be listed
+	refreshing map[string]bool            // hosts whose list is being read
+	loaded     bool                       // this machine has been listed once
+	listErr    error                      // listing this machine failed
 	status     string
 	statusErr  bool
 
@@ -133,64 +173,112 @@ type Model struct {
 	width, height int
 }
 
-// New returns the initial model. self is the ID of the screen session switchboard runs in, or
-// empty.
-func New(self string) Model {
+// New returns the initial model for this machine and the given other hosts. self is the ID of
+// the screen session switchboard runs in, or empty.
+func New(self string, hosts ...string) Model {
 	in := textinput.New()
 	in.Prompt = ""
 	in.CharLimit = 0
-	return Model{self: self, input: in, width: 80, height: 24}
+	return Model{
+		self: self, input: in, width: 80, height: 24,
+		hosts:      append([]string{""}, hosts...),
+		byHost:     map[string][]sessions.Info{},
+		hostErr:    map[string]error{},
+		refreshing: map[string]bool{},
+	}
 }
 
-// Run starts the overview on the terminal and returns when the user quits.
+// Run starts the overview on the terminal with this machine and the configured hosts, and
+// returns when the user quits.
 func Run() error {
-	p := tea.NewProgram(New(os.Getenv("STY")), tea.WithAltScreen())
-	_, err := p.Run()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	var names []string
+	for _, h := range host.FromConfig(cfg) {
+		registry[h.Name()] = h
+		names = append(names, h.Name())
+		defer h.Close()
+	}
+	p := tea.NewProgram(New(os.Getenv("STY"), names...), tea.WithAltScreen())
+	_, err = p.Run()
 	return err
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(), tickCmd())
+	cmds := []tea.Cmd{tickCmd()}
+	for _, h := range m.hosts {
+		m.refreshing[h] = true
+		cmds = append(cmds, refreshCmd(h))
+	}
+	return tea.Batch(cmds...)
+}
+
+// refreshAll starts reading the hosts whose list is not being read already.
+func (m *Model) refreshAll() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, h := range m.hosts {
+		if !m.refreshing[h] {
+			m.refreshing[h] = true
+			cmds = append(cmds, refreshCmd(h))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// merge rebuilds the list of all sessions from the lists of the hosts.
+func (m *Model) merge() {
+	m.all = m.all[:0:0]
+	for _, h := range m.hosts {
+		m.all = append(m.all, m.byHost[h]...)
+	}
+	sessions.Sort(m.all)
+}
+
+// isSelf reports whether s is the session the overview runs in.
+func (m Model) isSelf(s sessions.Info) bool {
+	return m.self != "" && s.Host == "" && s.ID == m.self
 }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-func refreshCmd() tea.Cmd {
+func refreshCmd(hostName string) tea.Cmd {
 	return func() tea.Msg {
-		infos, warn, err := collect()
-		return sessionsMsg{infos: infos, warn: warn, err: err}
+		infos, warn, err := collect(hostName)
+		return sessionsMsg{host: hostName, infos: infos, warn: warn, err: err}
 	}
 }
 
 func peekCmd(s sessions.Info, seq int) tea.Cmd {
-	id, window := s.ID, s.Window()
+	hostName, id, key, window := s.Host, s.ID, s.Key(), s.Window()
 	return func() tea.Msg {
-		lines, err := hardcopy(id, window)
-		return peekMsg{id: id, seq: seq, lines: lines, err: err}
+		lines, err := hardcopy(hostName, id, window)
+		return peekMsg{id: key, seq: seq, lines: lines, err: err}
 	}
 }
 
 func sendCmd(s sessions.Info, text string) tea.Cmd {
-	id, window := s.ID, s.Window()
+	hostName, id, key, window := s.Host, s.ID, s.Key(), s.Window()
 	return func() tea.Msg {
-		return sentMsg{id: id, err: stuff(id, window, text, true)}
+		return sentMsg{id: key, err: stuff(hostName, id, window, text, true)}
 	}
 }
 
 func readDialogCmd(s sessions.Info, n int) tea.Cmd {
-	id, window := s.ID, s.Window()
+	hostName, id, key, window := s.Host, s.ID, s.Key(), s.Window()
 	return func() tea.Msg {
-		d, err := readDialog(id, window)
-		return dialogMsg{id: id, n: n, d: d, err: err}
+		d, err := readDialog(hostName, id, window)
+		return dialogMsg{id: key, n: n, d: d, err: err}
 	}
 }
 
 func answerCmd(s sessions.Info, n int, label, fingerprint string) tea.Cmd {
-	id, window := s.ID, s.Window()
+	hostName, id, key, window := s.Host, s.ID, s.Key(), s.Window()
 	return func() tea.Msg {
-		return answeredMsg{id: id, n: n, label: label, err: sendChoice(id, window, n, label, fingerprint)}
+		return answeredMsg{id: key, n: n, label: label, err: sendChoice(hostName, id, window, n, label, fingerprint)}
 	}
 }
 
@@ -230,21 +318,21 @@ func (m *Model) applyView() {
 	}
 	m.cursor = min(m.cursor, len(m.visible)-1)
 	for i, s := range m.visible {
-		if s.ID == m.selected {
+		if s.Key() == m.selected {
 			m.cursor = i
 			break
 		}
 	}
 	m.cursor = max(m.cursor, 0)
 	if s, ok := m.current(); ok {
-		m.selected = s.ID
+		m.selected = s.Key()
 	} else {
 		m.selected = ""
 	}
 }
 
 func searchText(s sessions.Info) string {
-	t := s.ID + " " + string(s.Status) + " " + s.Message
+	t := s.Key() + " " + string(s.Status) + " " + s.Message
 	if s.Agent != nil {
 		t += " " + s.Agent.Cwd
 	}
@@ -268,7 +356,7 @@ func (m *Model) selectionChanged(before string) tea.Cmd {
 // startPeek reads the selected session now.
 func (m *Model) startPeek() tea.Cmd {
 	s, ok := m.current()
-	if !ok || (m.self != "" && s.ID == m.self) {
+	if !ok || m.isSelf(s) {
 		return nil
 	}
 	m.peekSeq++
@@ -283,25 +371,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		cmds := []tea.Cmd{tickCmd()}
-		if !m.refreshing {
-			m.refreshing = true
-			cmds = append(cmds, refreshCmd())
-		}
-		return m, tea.Batch(cmds...)
+		cmd := tea.Batch(tickCmd(), m.refreshAll())
+		return m, cmd
 
 	case sessionsMsg:
-		m.refreshing = false
-		m.loaded = true
-		m.listErr = msg.err
+		m.refreshing[msg.host] = false
+		if msg.host == "" {
+			m.loaded = true
+			m.listErr = msg.err
+		}
 		if msg.err != nil {
-			return m, nil
+			if msg.host == "" {
+				m.hostErr[msg.host] = msg.err
+				return m, nil
+			}
+			if m.hostErr[msg.host] == nil {
+				m.setStatus(msg.err.Error(), true)
+			}
+			m.hostErr[msg.host] = msg.err
+			m.byHost[msg.host] = nil
+		} else {
+			delete(m.hostErr, msg.host)
+			m.byHost[msg.host] = msg.infos
 		}
 		if msg.warn != nil {
-			m.setStatus("Warning: "+msg.warn.Error(), true)
+			prefix := "Warning: "
+			if msg.host != "" {
+				prefix += msg.host + ": "
+			}
+			m.setStatus(prefix+msg.warn.Error(), true)
 		}
 		before := m.selected
-		m.all = msg.infos
+		m.merge()
 		m.applyView()
 		m.clampOffset()
 		if cmd := m.selectionChanged(before); cmd != nil {
@@ -334,11 +435,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setStatus("Sent to "+msg.id+".", false)
-		cmd := tea.Batch(refreshCmd(), m.startPeek())
+		cmd := tea.Batch(m.refreshAll(), m.startPeek())
 		return m, cmd
 
 	case dialogMsg:
-		if m.mode != modeAnswer || m.answerReady || msg.id != m.answerTarget.ID || msg.n != m.answerN {
+		if m.mode != modeAnswer || m.answerReady || msg.id != m.answerTarget.Key() || msg.n != m.answerN {
 			return m, nil
 		}
 		switch {
@@ -363,7 +464,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.setStatus(text, false)
 		}
-		cmd := tea.Batch(refreshCmd(), m.startPeek())
+		cmd := tea.Batch(m.refreshAll(), m.startPeek())
 		return m, cmd
 
 	case attachedMsg:
@@ -372,8 +473,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("Back from "+msg.id+".", false)
 		}
-		m.refreshing = true
-		cmd := tea.Batch(refreshCmd(), m.startPeek())
+		cmd := tea.Batch(m.refreshAll(), m.startPeek())
 		return m, cmd
 
 	case tea.KeyMsg:
@@ -414,7 +514,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cursor = min(max(to, 0), len(m.visible)-1)
-		m.selected = m.visible[m.cursor].ID
+		m.selected = m.visible[m.cursor].Key()
 		m.clampOffset()
 		cmd := m.selectionChanged(before)
 		return m, cmd
@@ -436,11 +536,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return move(len(m.visible) - 1)
 	case "r":
 		m.setStatus("", false)
-		if !m.refreshing {
-			m.refreshing = true
-			return m, refreshCmd()
-		}
-		return m, nil
+		return m, m.refreshAll()
 	case "a":
 		m.agentsOnly = !m.agentsOnly
 		m.applyView()
@@ -469,7 +565,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if s.State == screen.StateDead {
-			m.setStatus(s.ID+" is dead; screen -wipe removes it.", true)
+			m.setStatus(s.Key()+" is dead; screen -wipe removes it.", true)
 			return m, nil
 		}
 		m.mode = modeSend
@@ -489,9 +585,9 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus(err.Error(), true)
 			return m, nil
 		}
-		id := s.ID
-		return m, tea.ExecProcess(attachCmd(id), func(err error) tea.Msg {
-			return attachedMsg{id: id, err: err}
+		key := s.Key()
+		return m, tea.ExecProcess(attachCmd(s.Host, s.ID), func(err error) tea.Msg {
+			return attachedMsg{id: key, err: err}
 		})
 	}
 	return m, nil
@@ -507,19 +603,19 @@ func (m Model) startAnswer(n int) (tea.Model, tea.Cmd) {
 	opts := choices(s)
 	switch {
 	case s.State == screen.StateDead:
-		m.setStatus(s.ID+" is dead; screen -wipe removes it.", true)
+		m.setStatus(s.Key()+" is dead; screen -wipe removes it.", true)
 		return m, nil
-	case m.self != "" && s.ID == m.self:
+	case m.isSelf(s):
 		m.setStatus("This is the session switchboard runs in.", true)
 		return m, nil
 	case s.Status != state.StatusWaiting:
-		m.setStatus(s.ID+" shows no dialog.", true)
+		m.setStatus(s.Key()+" shows no dialog.", true)
 		return m, nil
 	case len(opts) == 0:
-		m.setStatus(s.ID+": the choices of the dialog cannot be read; attach to answer it.", true)
+		m.setStatus(s.Key()+": the choices of the dialog cannot be read; attach to answer it.", true)
 		return m, nil
 	case n > len(opts):
-		m.setStatus(fmt.Sprintf("%s: the dialog has only %d choices.", s.ID, len(opts)), true)
+		m.setStatus(fmt.Sprintf("%s: the dialog has only %d choices.", s.Key(), len(opts)), true)
 		return m, nil
 	}
 	m.mode = modeAnswer
@@ -543,7 +639,7 @@ func (m Model) updateAnswer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	label := m.answerDialog.Options[m.answerN-1]
-	m.setStatus(fmt.Sprintf("Answering %s: %d. %s …", m.answerTarget.ID, m.answerN, label), false)
+	m.setStatus(fmt.Sprintf("Answering %s: %d. %s …", m.answerTarget.Key(), m.answerN, label), false)
 	return m, answerCmd(m.answerTarget, m.answerN, label, m.answerDialog.Fingerprint)
 }
 
@@ -551,8 +647,8 @@ func (m Model) updateAnswer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) canAttach(s sessions.Info) error {
 	switch {
 	case s.State == screen.StateDead:
-		return fmt.Errorf("%s is dead; screen -wipe removes it", s.ID)
-	case m.self != "" && s.ID == m.self:
+		return fmt.Errorf("%s is dead; screen -wipe removes it", s.Key())
+	case m.isSelf(s):
 		return errors.New("this is the session switchboard runs in; attaching to it would loop")
 	}
 	return nil
@@ -598,7 +694,7 @@ func (m Model) updateSend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		m.input.Blur()
 		text := m.input.Value()
-		m.setStatus("Sending to "+m.sendTarget.ID+" …", false)
+		m.setStatus("Sending to "+m.sendTarget.Key()+" …", false)
 		return m, sendCmd(m.sendTarget, text)
 	}
 	var cmd tea.Cmd

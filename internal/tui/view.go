@@ -95,6 +95,11 @@ func (m Model) titleLine() string {
 	if m.filter != "" && m.mode != modeFilter {
 		parts = append(parts, "filter: "+m.filter)
 	}
+	for _, h := range m.hosts {
+		if h != "" && m.hostErr[h] != nil {
+			parts = append(parts, styleError.Render(h+" offline"))
+		}
+	}
 	return fit(strings.Join(parts, styleDim.Render(" · ")), m.width)
 }
 
@@ -107,10 +112,10 @@ func (m Model) sessionWidth() int {
 }
 
 func (m Model) sessionLabel(s sessions.Info) string {
-	if m.self != "" && s.ID == m.self {
+	if m.isSelf(s) {
 		return s.ID + " (here)"
 	}
-	return s.ID
+	return s.Key()
 }
 
 func (m Model) listView(rows int) string {
@@ -191,7 +196,7 @@ func (m Model) peekView(rows int) string {
 	s, ok := m.current()
 	title := "── "
 	if ok {
-		title += fmt.Sprintf("%s · window %d ", s.ID, s.Window())
+		title += fmt.Sprintf("%s · window %d ", s.Key(), s.Window())
 	}
 	b.WriteString(styleDim.Render(ansi.Truncate(title+strings.Repeat("─", max(m.width, 0)), max(m.width, 0), "")))
 	b.WriteByte('\n')
@@ -199,9 +204,9 @@ func (m Model) peekView(rows int) string {
 	var lines []string
 	switch {
 	case !ok:
-	case m.self != "" && s.ID == m.self:
+	case m.isSelf(s):
 		lines = []string{styleDim.Render("This is the session the overview runs in.")}
-	case m.peekID != s.ID:
+	case m.peekID != s.Key():
 		lines = []string{styleDim.Render("Reading the screen …")}
 	case m.peekErr != nil:
 		lines = []string{styleError.Render(fit(m.peekErr.Error(), m.width))}
@@ -225,17 +230,17 @@ func (m Model) footer() string {
 		m.input.Width = max(m.width-12, 1)
 		return "Filter: " + m.input.View()
 	case modeSend:
-		prefix := "Send to " + m.sendTarget.ID + ": "
+		prefix := "Send to " + m.sendTarget.Key() + ": "
 		hint := styleDim.Render("  enter send · esc cancel")
 		m.input.Width = max(m.width-ansi.StringWidth(prefix)-ansi.StringWidth(hint)-1, 1)
 		return fit(prefix+m.input.View()+hint, m.width)
 	case modeAnswer:
 		if !m.answerReady {
-			return fit("Reading the dialog of "+m.answerTarget.ID+" …", m.width)
+			return fit("Reading the dialog of "+m.answerTarget.Key()+" …", m.width)
 		}
 		label := m.answerDialog.Options[m.answerN-1]
 		// The label comes last, so that a narrow terminal cuts its tail and not the key hint.
-		return fit("Answer "+m.answerTarget.ID+styleDim.Render(" with y (other key cancels)")+
+		return fit("Answer "+m.answerTarget.Key()+styleDim.Render(" with y (other key cancels)")+
 			fmt.Sprintf(": %d %q", m.answerN, label), m.width)
 	}
 	if m.status != "" {

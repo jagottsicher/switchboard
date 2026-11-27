@@ -94,6 +94,7 @@ func fakeSSH(t *testing.T, helper string) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := `#!/bin/sh
+echo call >> "$SB_LOG.ssh"
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) shift 2 ;;
@@ -253,5 +254,26 @@ func TestRemoteBinaryAndAttach(t *testing.T) {
 	args = r.sshArgs(false)
 	if args[0] != "-T" || !strings.Contains(strings.Join(args, " "), "BatchMode=yes") || args[len(args)-2] != "--" {
 		t.Errorf("request args = %q", args)
+	}
+}
+
+func TestRemoteBacksOffAfterFailure(t *testing.T) {
+	log := fakeSSH(t, "serve")
+	r := NewRemote("box", "down", self(t))
+	defer r.Close()
+	_, _, err1 := r.List()
+	_, _, err2 := r.List()
+	if !errors.Is(err1, ErrOffline) || err2 != err1 {
+		t.Errorf("errors = %v, %v", err1, err2)
+	}
+	calls, _ := os.ReadFile(log + ".ssh")
+	if n := strings.Count(string(calls), "call"); n != 1 {
+		t.Errorf("ssh started %d times, want 1", n)
+	}
+	r.Close()
+	r.List()
+	calls, _ = os.ReadFile(log + ".ssh")
+	if n := strings.Count(string(calls), "call"); n != 2 {
+		t.Errorf("after Close, ssh started %d times in total, want 2", n)
 	}
 }

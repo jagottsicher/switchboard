@@ -25,6 +25,10 @@ var (
 	callTimeout   = 20 * time.Second
 	helloTimeout  = 20 * time.Second
 	controlDirFor = controlDir
+	// retryAfter is how long a host that could not be reached is not tried again. Calls in
+	// that time fail at once with the last error, so that an overview refreshing every few
+	// seconds does not start ssh for an unreachable host each time.
+	retryAfter = 30 * time.Second
 )
 
 // ErrOffline means that the host could not be reached.
@@ -43,6 +47,9 @@ type Remote struct {
 	lines  chan []byte
 	stderr *bytes.Buffer
 	nextID int
+
+	failedAt time.Time // when the connection last failed
+	lastErr  error
 }
 
 // NewRemote returns the host called name, reached with `ssh alias`. binary is the path of
@@ -75,7 +82,7 @@ func controlDir() (string, error) {
 // sshArgs returns the ssh arguments up to and including the host alias. Interactive sessions
 // get a terminal and may ask for a password; the connection for requests may not.
 func (r *Remote) sshArgs(interactive bool) []string {
-	args := []string{"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}
+	args := []string{"-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}
 	if interactive {
 		args = append([]string{"-t"}, args...)
 	} else {
@@ -203,6 +210,7 @@ func (r *Remote) Close() error {
 	if r.cmd != nil {
 		r.fail(errors.New("closed"))
 	}
+	r.lastErr = nil
 	return nil
 }
 
@@ -212,9 +220,14 @@ func (r *Remote) call(req request) (response, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.cmd == nil {
+		if r.lastErr != nil && time.Since(r.failedAt) < retryAfter {
+			return response{}, r.lastErr
+		}
 		if err := r.start(); err != nil {
+			r.failedAt, r.lastErr = time.Now(), err
 			return response{}, err
 		}
+		r.lastErr = nil
 	}
 	r.nextID++
 	req.ID = r.nextID
