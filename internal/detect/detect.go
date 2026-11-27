@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/jagottsicher/switchboard/internal/state"
@@ -84,22 +85,28 @@ func dialog(lines []string) (question string, options []string) {
 }
 
 // joinWrapped returns line together with the lines it continues. A narrow window wraps a long
-// question, so its beginning ends up on the lines above. A line belongs to it if it has the
-// same indentation and is plain text that neither ends a sentence nor is an item of a numbered
-// list. At most three lines above are taken.
+// question, so its beginning ends up on the lines above. A line belongs to it if the text below
+// it does not start with a capital letter, as a new sentence would, and if it has the same
+// indentation and is plain text that neither ends a sentence nor is an item of a numbered list.
+// At most three lines above are taken.
 func joinWrapped(above []string, line string) string {
 	text := strings.TrimSpace(line)
 	indent := indentation(line)
 	for i := len(above) - 1; i >= 0 && i >= len(above)-3; i-- {
 		l := above[i]
 		t := strings.TrimSpace(l)
-		if t == "" || indentation(l) != indent || !plainText(t) || strings.ContainsAny(t[len(t)-1:], ".:?!") ||
-			optionLine.MatchString(l) {
+		if t == "" || startsUpper(text) || indentation(l) != indent || !plainText(t) ||
+			strings.ContainsAny(t[len(t)-1:], ".:?!") || optionLine.MatchString(l) {
 			break
 		}
 		text = t + " " + text
 	}
 	return text
+}
+
+func startsUpper(t string) bool {
+	r, _ := utf8.DecodeRuneInString(t)
+	return unicode.IsUpper(r)
 }
 
 func indentation(l string) int {

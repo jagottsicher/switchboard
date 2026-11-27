@@ -1,6 +1,6 @@
 // Package tui is the interactive overview of switchboard: a list of all screen sessions with
-// the status of their agents, a live view of the selected session, sending text, and attaching
-// with screen -x.
+// the status of their agents, a live view of the selected session, sending text, answering
+// dialogs, and attaching with screen -x.
 package tui
 
 import (
@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jagottsicher/switchboard/internal/answer"
 	"github.com/jagottsicher/switchboard/internal/screen"
 	"github.com/jagottsicher/switchboard/internal/sessions"
 	"github.com/jagottsicher/switchboard/internal/state"
@@ -30,9 +32,11 @@ var (
 		infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true, Self: os.Getenv("STY")})
 		return infos, warn, err
 	}
-	hardcopy  = screen.Hardcopy
-	stuff     = screen.Stuff
-	attachCmd = func(id string) *exec.Cmd {
+	hardcopy   = screen.Hardcopy
+	stuff      = screen.Stuff
+	readDialog = answer.Read
+	sendChoice = answer.Send
+	attachCmd  = func(id string) *exec.Cmd {
 		args := screen.AttachArgs(id)
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Env = screen.AttachEnv()
@@ -54,6 +58,7 @@ const (
 	modeList mode = iota
 	modeFilter
 	modeSend
+	modeAnswer
 )
 
 type (
@@ -77,6 +82,18 @@ type (
 		id  string
 		err error
 	}
+	dialogMsg struct {
+		id  string
+		n   int
+		d   answer.Dialog
+		err error
+	}
+	answeredMsg struct {
+		id    string
+		n     int
+		label string
+		err   error
+	}
 )
 
 // Model is the Bubble Tea model of the overview.
@@ -92,6 +109,13 @@ type Model struct {
 	mode       mode
 	input      textinput.Model
 	sendTarget sessions.Info
+
+	// Answering a dialog: the choice the user pressed, and the dialog as read from the screen
+	// right after the key press. answerReady is false while that read is still running.
+	answerTarget sessions.Info
+	answerN      int
+	answerDialog answer.Dialog
+	answerReady  bool
 
 	peekID    string
 	peekLines []string
@@ -153,6 +177,29 @@ func sendCmd(s sessions.Info, text string) tea.Cmd {
 	return func() tea.Msg {
 		return sentMsg{id: id, err: stuff(id, window, text, true)}
 	}
+}
+
+func readDialogCmd(s sessions.Info, n int) tea.Cmd {
+	id, window := s.ID, s.Window()
+	return func() tea.Msg {
+		d, err := readDialog(id, window)
+		return dialogMsg{id: id, n: n, d: d, err: err}
+	}
+}
+
+func answerCmd(s sessions.Info, n int, label, fingerprint string) tea.Cmd {
+	id, window := s.ID, s.Window()
+	return func() tea.Msg {
+		return answeredMsg{id: id, n: n, label: label, err: sendChoice(id, window, n, label, fingerprint)}
+	}
+}
+
+// choices returns the choices of the dialog that s shows, if they could be read.
+func choices(s sessions.Info) []string {
+	if s.Status != state.StatusWaiting || s.Detected == nil {
+		return nil
+	}
+	return s.Detected.Options
 }
 
 // current returns the selected session.
@@ -290,6 +337,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := tea.Batch(refreshCmd(), m.startPeek())
 		return m, cmd
 
+	case dialogMsg:
+		if m.mode != modeAnswer || m.answerReady || msg.id != m.answerTarget.ID || msg.n != m.answerN {
+			return m, nil
+		}
+		switch {
+		case msg.err != nil:
+			m.mode = modeList
+			m.setStatus(fmt.Sprintf("%s: %v", msg.id, msg.err), true)
+		case msg.n > len(msg.d.Options):
+			m.mode = modeList
+			m.setStatus(fmt.Sprintf("%s: the dialog has only %d choices.", msg.id, len(msg.d.Options)), true)
+		default:
+			m.answerDialog, m.answerReady = msg.d, true
+		}
+		return m, nil
+
+	case answeredMsg:
+		if msg.err != nil {
+			m.setStatus(fmt.Sprintf("Answering %s failed: %v", msg.id, msg.err), true)
+		} else {
+			text := fmt.Sprintf("Answered %s: %d. %s", msg.id, msg.n, msg.label)
+			if strings.EqualFold(msg.label, "Type something.") {
+				text += " Type the answer with s."
+			}
+			m.setStatus(text, false)
+		}
+		cmd := tea.Batch(refreshCmd(), m.startPeek())
+		return m, cmd
+
 	case attachedMsg:
 		if msg.err != nil {
 			m.setStatus(fmt.Sprintf("Attaching to %s failed: %v", msg.id, msg.err), true)
@@ -304,12 +380,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Over ssh, several keys typed quickly can arrive as one message. In the list, each
 		// of them is a command of its own; once one opens an input, the rest is typed there.
 		if m.mode == modeList && msg.Type == tea.KeyRunes && len(msg.Runes) > 1 && !msg.Paste {
+			// A choice must be confirmed with a key of its own, so the rest of the burst after a
+			// digit is dropped.
 			var model tea.Model = m
 			var cmds []tea.Cmd
 			for _, r := range msg.Runes {
 				var cmd tea.Cmd
 				model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 				cmds = append(cmds, cmd)
+				if model.(Model).mode == modeAnswer {
+					break
+				}
 			}
 			return model, tea.Batch(cmds...)
 		}
@@ -318,6 +399,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFilter(msg)
 		case modeSend:
 			return m.updateSend(msg)
+		case modeAnswer:
+			return m.updateAnswer(msg)
 		}
 		return m.updateList(msg)
 	}
@@ -394,6 +477,9 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.SetValue("")
 		cmd := m.input.Focus()
 		return m, cmd
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		n, _ := strconv.Atoi(msg.String())
+		return m.startAnswer(n)
 	case "enter":
 		s, ok := m.current()
 		if !ok {
@@ -409,6 +495,56 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 	}
 	return m, nil
+}
+
+// startAnswer begins answering the dialog of the selected session with choice n. The dialog is
+// read again from the screen, and the choice is only sent after the user confirmed its label.
+func (m Model) startAnswer(n int) (tea.Model, tea.Cmd) {
+	s, ok := m.current()
+	if !ok {
+		return m, nil
+	}
+	opts := choices(s)
+	switch {
+	case s.State == screen.StateDead:
+		m.setStatus(s.ID+" is dead; screen -wipe removes it.", true)
+		return m, nil
+	case m.self != "" && s.ID == m.self:
+		m.setStatus("This is the session switchboard runs in.", true)
+		return m, nil
+	case s.Status != state.StatusWaiting:
+		m.setStatus(s.ID+" shows no dialog.", true)
+		return m, nil
+	case len(opts) == 0:
+		m.setStatus(s.ID+": the choices of the dialog cannot be read; attach to answer it.", true)
+		return m, nil
+	case n > len(opts):
+		m.setStatus(fmt.Sprintf("%s: the dialog has only %d choices.", s.ID, len(opts)), true)
+		return m, nil
+	}
+	m.mode = modeAnswer
+	m.answerTarget, m.answerN = s, n
+	m.answerDialog, m.answerReady = answer.Dialog{}, false
+	m.setStatus("", false)
+	return m, readDialogCmd(s, n)
+}
+
+func (m Model) updateAnswer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if key == "ctrl+c" {
+		return m, tea.Quit
+	}
+	if !m.answerReady && key != "esc" {
+		return m, nil
+	}
+	m.mode = modeList
+	if key != "y" {
+		m.setStatus("Nothing sent.", false)
+		return m, nil
+	}
+	label := m.answerDialog.Options[m.answerN-1]
+	m.setStatus(fmt.Sprintf("Answering %s: %d. %s …", m.answerTarget.ID, m.answerN, label), false)
+	return m, answerCmd(m.answerTarget, m.answerN, label, m.answerDialog.Fingerprint)
 }
 
 // canAttach refuses sessions that cannot or must not be attached from here.

@@ -229,6 +229,14 @@ func (m Model) footer() string {
 		hint := styleDim.Render("  enter send · esc cancel")
 		m.input.Width = max(m.width-ansi.StringWidth(prefix)-ansi.StringWidth(hint)-1, 1)
 		return fit(prefix+m.input.View()+hint, m.width)
+	case modeAnswer:
+		if !m.answerReady {
+			return fit("Reading the dialog of "+m.answerTarget.ID+" …", m.width)
+		}
+		label := m.answerDialog.Options[m.answerN-1]
+		// The label comes last, so that a narrow terminal cuts its tail and not the key hint.
+		return fit("Answer "+m.answerTarget.ID+styleDim.Render(" with y (other key cancels)")+
+			fmt.Sprintf(": %d %q", m.answerN, label), m.width)
 	}
 	if m.status != "" {
 		if m.statusErr {
@@ -238,6 +246,11 @@ func (m Model) footer() string {
 	}
 	keys := [][2]string{
 		{"enter", "attach"}, {"s", "send"}, {"/", "filter"}, {"a", "agents"}, {"r", "refresh"}, {"q", "quit"},
+	}
+	if s, ok := m.current(); ok {
+		if n := min(len(choices(s)), 9); n > 0 {
+			keys = append([][2]string{{fmt.Sprintf("1-%d", n), "answer"}}, keys...)
+		}
 	}
 	var parts []string
 	for _, k := range keys {
