@@ -7,8 +7,8 @@ import (
 // version is set for release builds via -ldflags "-X main.version=…".
 var version = "dev"
 
-// newRootCmd builds the root command. Subcommands are added in later steps; without a subcommand,
-// the TUI will start in a later version.
+// newRootCmd builds the root command with all subcommands. Without a subcommand, the TUI will
+// start in a later version.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "switchboard",
@@ -18,5 +18,6 @@ func newRootCmd() *cobra.Command {
 		Version:      version,
 		SilenceUsage: true,
 	}
+	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAttachCmd(), newNewCmd())
 	return root
 }
