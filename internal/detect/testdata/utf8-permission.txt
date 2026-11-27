@@ -1,0 +1,16 @@
+Ï Write(sb-detect-probe.txt)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ Create file
+ sb-detect-probe.txt
+LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL
+  1 hi
+LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL
+ Do you want to create sb-detect-probe.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file
+      commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

@@ -19,6 +19,7 @@ func agent(id string, st state.Status, msg string) sessions.Info {
 		Session: screen.Session{ID: id, State: screen.StateDetached},
 		Agent:   &state.Record{Agent: true, Status: st, Message: msg, Window: "1"},
 		Status:  st,
+		Message: msg,
 	}
 }
 

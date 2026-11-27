@@ -27,7 +27,7 @@ var (
 		if err != nil {
 			return nil, nil, err
 		}
-		infos, warn, err := sessions.Collect(store, true)
+		infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true, Self: os.Getenv("STY")})
 		return infos, warn, err
 	}
 	hardcopy  = screen.Hardcopy
@@ -197,9 +197,9 @@ func (m *Model) applyView() {
 }
 
 func searchText(s sessions.Info) string {
-	t := s.ID + " " + string(s.Status)
+	t := s.ID + " " + string(s.Status) + " " + s.Message
 	if s.Agent != nil {
-		t += " " + s.Agent.Cwd + " " + s.Agent.Message
+		t += " " + s.Agent.Cwd
 	}
 	return t
 }

@@ -1,0 +1,16 @@
+o Create a file named sb-detect-probe.txt that contains the word hi.
+
+
+
+
+
+
+
+
+
+
+6 Herding… (0s · thinking with high effort)
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ø manual mode on · esc to interrupt

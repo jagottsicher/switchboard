@@ -14,8 +14,8 @@ need a daemon.
 ## Status
 
 Early development. The interactive overview and the commands below work, including agent status
-from hooks. Status detection from the screen contents and multi-host support are not implemented
-yet (see [Roadmap](#roadmap)).
+from hooks and from the screen contents. Multi-host support is not implemented yet (see
+[Roadmap](#roadmap)).
 
 ## Requirements
 
@@ -129,6 +129,21 @@ switchboard notify --status idle "Build finished"
 The typical setup is to log in to the machine that runs your agents via ssh and start
 switchboard there.
 
+### Status from the screen
+
+`list` and the overview also read the visible screen of every session and recognize the
+screens of Claude Code: working (the footer offers to interrupt with Esc), waiting (a
+permission, question or trust dialog) and idle (the input line). For a waiting agent, the
+question of the dialog becomes the message. This covers what hooks cannot report: after an
+interrupt with Esc or a denied permission, the agent sends no further event, but the screen
+shows the input line again. It also finds agents in sessions that have no hooks and were not
+started with `switchboard new`.
+
+A hook event less than five seconds old takes precedence over the screen, because the screen
+lags behind; after that, a recognized screen wins. If the screen is not recognized, the status
+from hooks and `notify` stays. The recognition only uses plain text in the bottom lines and was
+tested with Claude Code 2.1; other versions may need adjustments.
+
 ## Known limitations
 
 - `peek` relies on `screen -X hardcopy`. screen 4.09 stores only the low byte of each character
@@ -137,13 +152,12 @@ switchboard there.
 - `send` escapes the characters screen interprets (`\`, `^`, `$`) and splits long text into
   chunks, because screen silently drops `stuff` arguments longer than about 760 bytes.
 - The overview shows screens through the same hardcopy, with the same limits.
-- When you interrupt an agent with Esc or deny a permission, the agent sends no final event, so
-  its status may stay at `working` or `waiting`. Detecting this from the screen contents is
-  planned.
+- The status from the screen only covers Claude Code so far. Other agents report through
+  `switchboard notify`.
 
 ## Roadmap
 
-1. A fallback that derives the agent status from the screen contents.
+1. Answering agent dialogs from the overview.
 2. Several hosts in one overview via ssh.
 3. Controlled access for other developers to shared sessions.
 

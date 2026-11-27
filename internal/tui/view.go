@@ -163,9 +163,9 @@ func (m Model) row(s sessions.Info, selected bool, sw, infoW int) string {
 		}
 	}
 	infoStyle := lipgloss.NewStyle()
+	info = s.Message
 	if s.Agent != nil {
 		since = sessions.Age(s.Agent.UpdatedAt)
-		info = s.Agent.Message
 		if info == "" && s.Agent.Cwd != "" {
 			info, infoStyle = homeShort(s.Agent.Cwd), styleDim
 		}

@@ -20,6 +20,16 @@ var (
 // Hardcopy reads the contents of window window of session id, including scrollback. Trailing
 // whitespace on each line and trailing empty lines are removed.
 func Hardcopy(id string, window int) ([]string, error) {
+	return hardcopy(id, window, true)
+}
+
+// Visible reads only what window window of session id shows right now, without scrollback.
+// It is cheaper than Hardcopy for frequent checks.
+func Visible(id string, window int) ([]string, error) {
+	return hardcopy(id, window, false)
+}
+
+func hardcopy(id string, window int, scrollback bool) ([]string, error) {
 	dir, err := privateTempDir()
 	if err != nil {
 		return nil, err
@@ -28,7 +38,11 @@ func Hardcopy(id string, window int) ([]string, error) {
 
 	// A fresh file per call, so that a .screenrc with "hardcopy_append on" does not interfere.
 	file := filepath.Join(dir, "hardcopy")
-	if err := run("", "-S", id, "-p", strconv.Itoa(window), "-X", "hardcopy", "-h", file); err != nil {
+	args := []string{"-S", id, "-p", strconv.Itoa(window), "-X", "hardcopy"}
+	if scrollback {
+		args = append(args, "-h")
+	}
+	if err := run("", append(args, file)...); err != nil {
 		return nil, err
 	}
 	data, err := waitForFile(file)
@@ -36,7 +50,12 @@ func Hardcopy(id string, window int) ([]string, error) {
 		return nil, fmt.Errorf("no output from session %s, window %d (does the window exist?): %w",
 			id, window, err)
 	}
-	return trimLines(decodeHardcopy(data)), nil
+	return ParseHardcopy(data), nil
+}
+
+// ParseHardcopy turns the contents of a hardcopy file into lines, as Hardcopy returns them.
+func ParseHardcopy(data []byte) []string {
+	return trimLines(decodeHardcopy(data))
 }
 
 // decodeHardcopy turns the contents of a hardcopy file into text.

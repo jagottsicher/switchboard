@@ -7,22 +7,28 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/jagottsicher/switchboard/internal/detect"
 	"github.com/jagottsicher/switchboard/internal/screen"
 	"github.com/jagottsicher/switchboard/internal/state"
 )
 
-// Info is a screen session together with the stored state of its agent, if any.
+// Info is a screen session together with what switchboard knows about its agent: the stored
+// record from hooks and notify, and what the screen shows. Status and Message are the result of
+// both.
 type Info struct {
 	screen.Session
-	Agent  *state.Record `json:"agent,omitempty"`
-	Status state.Status  `json:"status,omitempty"`
+	Agent    *state.Record  `json:"agent,omitempty"`
+	Detected *detect.Result `json:"detected,omitempty"`
+	Status   state.Status   `json:"status,omitempty"`
+	Message  string         `json:"message,omitempty"`
 }
 
 // IsAgent reports whether the session is known to run an agent.
 func (i Info) IsAgent() bool {
-	return i.Agent != nil && i.Agent.Agent
+	return (i.Agent != nil && i.Agent.Agent) || i.Detected != nil
 }
 
 // Window returns the screen window the agent reported, or 0.
@@ -38,13 +44,33 @@ func (i Info) Window() int {
 // Swappable for tests.
 var (
 	listScreens = screen.List
+	readScreen  = screen.Visible
 	now         = time.Now
 )
 
+const (
+	// hookGrace is how long a hook event takes precedence over the screen. The screen lags
+	// behind: right after a prompt was submitted, it may still show the idle input line.
+	hookGrace = 5 * time.Second
+	// parallelReads limits how many screens are read at the same time.
+	parallelReads = 4
+)
+
+// Options control Collect.
+type Options struct {
+	// Prune removes the records of sessions that no longer exist.
+	Prune bool
+	// Detect reads the visible screen of each session and recognizes agents on it.
+	Detect bool
+	// Self is the session switchboard runs in ($STY), if any. Its screen is not read: it may
+	// show another agent's screen.
+	Self string
+}
+
 // Collect lists the screen sessions together with their stored state, sorted so that sessions
-// needing attention come first. With prune, it also removes the records of sessions that no
-// longer exist; a problem there is returned as warn while the list itself is still valid.
-func Collect(store *state.Store, prune bool) (infos []Info, warn error, err error) {
+// needing attention come first. A problem with pruning is returned as warn while the list
+// itself is still valid.
+func Collect(store *state.Store, opts Options) (infos []Info, warn error, err error) {
 	listed := now()
 	list, err := listScreens()
 	if err != nil {
@@ -61,22 +87,89 @@ func Collect(store *state.Store, prune bool) (infos []Info, warn error, err erro
 		info := Info{Session: s}
 		if rec, ok := records[s.ID]; ok {
 			info.Agent = &rec
-			info.Status = rec.Status
-		}
-		if s.State == screen.StateDead {
-			info.Status = state.StatusExited
 		}
 		infos = append(infos, info)
 	}
+	var detected []*detect.Result
+	if opts.Detect {
+		detected = detectAll(infos, opts.Self)
+	}
+	for i := range infos {
+		var d *detect.Result
+		if detected != nil {
+			d = detected[i]
+		}
+		resolve(&infos[i], d)
+	}
 	// Pruning only follows a successful screen -ls, so a broken screen setup never wipes state.
 	// Records written after the listing started belong to sessions that may be too new for it.
-	if prune {
+	if opts.Prune {
 		if err := store.Prune(alive, listed); err != nil {
 			warn = fmt.Errorf("cleaning up old state: %w", err)
 		}
 	}
 	Sort(infos)
 	return infos, warn, nil
+}
+
+// detectAll reads the visible screen of every live session and runs the detector on it. Read
+// errors only mean that nothing is detected for that session.
+func detectAll(infos []Info, self string) []*detect.Result {
+	out := make([]*detect.Result, len(infos))
+	sem := make(chan struct{}, parallelReads)
+	var wg sync.WaitGroup
+	for i, info := range infos {
+		if info.State == screen.StateDead || (self != "" && info.ID == self) {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			lines, err := readScreen(info.ID, info.Window())
+			if err != nil {
+				return
+			}
+			if r, ok := detect.Detect(lines); ok {
+				out[i] = &r
+			}
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// resolve sets Status, Message and Detected of info from the stored record and what the screen
+// shows. A dead session is exited, and so is an agent that reported its end. A recent hook
+// event wins, because the screen lags behind it;
+// otherwise a recognized screen wins, which covers changes that send no hook event, such as an
+// interrupt with Esc or a denied permission. Without either, the record decides.
+func resolve(info *Info, d *detect.Result) {
+	rec := info.Agent
+	info.Detected = d
+	switch {
+	case info.State == screen.StateDead:
+		info.Status = state.StatusExited
+		if rec != nil {
+			info.Message = rec.Message
+		}
+	case rec != nil && rec.Status == state.StatusExited:
+		info.Status = state.StatusExited
+		info.Message = rec.Message
+	case d != nil && (rec == nil || rec.Status == "" || now().Sub(rec.UpdatedAt) > hookGrace):
+		info.Status = d.Status
+		info.Message = ""
+		switch {
+		case d.Status == state.StatusWaiting && d.Question != "":
+			info.Message = d.Question
+		case rec != nil && rec.Status == d.Status:
+			info.Message = rec.Message
+		}
+	case rec != nil:
+		info.Status = rec.Status
+		info.Message = rec.Message
+	}
 }
 
 // Sort orders sessions by Rank, then by ID.

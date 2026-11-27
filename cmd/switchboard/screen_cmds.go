@@ -30,7 +30,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			infos, warn, err := sessions.Collect(store, true)
+			infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true, Self: os.Getenv("STY")})
 			if err != nil {
 				return err
 			}
@@ -63,14 +63,14 @@ func newListCmd() *cobra.Command {
 				if s.Multi {
 					screenState += "/multi"
 				}
-				status, since, msg := "-", "-", ""
-				if s.Agent != nil {
-					status = string(s.Status)
-					since = sessions.Age(s.Agent.UpdatedAt)
-					msg = sessions.Shorten(s.Agent.Message, 60)
-				} else if s.Status != "" {
+				status, since := "-", "-"
+				if s.Status != "" {
 					status = string(s.Status)
 				}
+				if s.Agent != nil {
+					since = sessions.Age(s.Agent.UpdatedAt)
+				}
+				msg := sessions.Shorten(s.Message, 60)
 				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, screenState, status, since, msg)
 			}
 			return tw.Flush()
