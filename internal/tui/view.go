@@ -234,8 +234,9 @@ func (m Model) footer() string {
 			return fit("Reading the dialog of "+m.answerTarget.ID+" …", m.width)
 		}
 		label := m.answerDialog.Options[m.answerN-1]
-		return fit(fmt.Sprintf("Answer %d %q to %s?", m.answerN, label, m.answerTarget.ID)+
-			styleDim.Render("  y send · other key cancels"), m.width)
+		// The label comes last, so that a narrow terminal cuts its tail and not the key hint.
+		return fit("Answer "+m.answerTarget.ID+styleDim.Render(" with y (other key cancels)")+
+			fmt.Sprintf(": %d %q", m.answerN, label), m.width)
 	}
 	if m.status != "" {
 		if m.statusErr {

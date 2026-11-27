@@ -4,7 +4,9 @@
 // The agent acts on the digit of a choice at once, without confirmation, and the numbers differ
 // between dialogs: "No" is choice 3 when creating a file but choice 4 for a shell command, where
 // 3 switches the agent to auto mode. So choices are always named by their label, and a choice is
-// only sent if the screen still shows the same dialog that the user looked at.
+// only sent if the screen still shows the dialog it was read from. Whether that is the dialog the
+// user looked at depends on the caller: the overview reads it before asking for confirmation, the
+// answer command right before sending.
 package answer
 
 import (

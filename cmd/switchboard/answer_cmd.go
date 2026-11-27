@@ -18,7 +18,8 @@ func newAnswerCmd() *cobra.Command {
 		Long: "Picks the choice labeled CHOICE in the dialog the agent shows, such as a permission\n" +
 			"prompt or a question. CHOICE is the whole label, for example \"No\"; case does not\n" +
 			"matter. Numbers are not accepted, because they differ between dialogs. Without CHOICE,\n" +
-			"the question and its choices are printed and nothing is sent.",
+			"the question and its choices are printed and nothing is sent. The choice goes to the\n" +
+			"dialog that is open at that moment; the confirmation names its question.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, window, err := findWithWindow(cmd, args[0], window)
@@ -51,6 +52,9 @@ func newAnswerCmd() *cobra.Command {
 				return fmt.Errorf("%s: %w", s.ID, err)
 			}
 			fmt.Fprintf(out, "Answered %s: %d. %s\n", s.ID, n, label)
+			if d.Question != "" {
+				fmt.Fprintf(out, "Question: %s\n", d.Question)
+			}
 			return nil
 		},
 	}

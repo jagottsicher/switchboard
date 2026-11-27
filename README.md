@@ -66,8 +66,8 @@ the selected session and follows it live. The overview refreshes every two secon
 | `r` | Refresh now |
 | `q` | Quit |
 
-Answering reads the dialog again from the screen and asks, for example, `Answer 4 "No" to
-12345.name?`. Only `y` sends the choice; any other key cancels. Before the choice is sent, the
+Answering reads the dialog again from the screen and asks, for example, `Answer 12345.name with y
+(other key cancels): 4 "No"`. Only `y` sends the choice; any other key cancels. Before the choice is sent, the
 screen is read once more, and if it no longer shows the same dialog, nothing is sent. The key
 help shows `1-N answer` when the selected session waits in a dialog whose choices could be read.
 
@@ -97,7 +97,8 @@ switchboard hooks print|install|uninstall      # manage the agent hooks
 `answer` without a choice prints the question and the choices of the dialog. With a choice, it
 picks the choice with exactly that label, regardless of case, and sends its digit without Enter.
 Numbers are not accepted: the agent acts on a digit at once, and the numbers differ between
-dialogs. A label that is not offered, or a screen that changed in between, sends nothing.
+dialogs. A label that is not offered sends nothing. The choice goes to the dialog that is open
+at that moment, which may be a newer one than you listed; the output names its question.
 
 `list` sorts sessions that need attention first. The status of an agent is one of:
 
@@ -174,6 +175,8 @@ tested with Claude Code 2.1; other versions may need adjustments.
 - The trust dialog has no numbers and preselects "No, exit", so a bare Enter quits the agent. It
   cannot be answered from switchboard; attach to answer it. The same applies when a very narrow
   window wraps the choices of a dialog so that they cannot be read, and to choices beyond 9.
+- In a narrow window, a wrapped question whose continuation starts with a capital letter, such
+  as a file name, is shown only from that line on. The choices are not affected.
 
 ## Roadmap
 

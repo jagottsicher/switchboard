@@ -65,7 +65,7 @@ func TestAnswerAfterConfirmation(t *testing.T) {
 		t.Fatal("confirmed before the dialog was read")
 	}
 	m, _ = update(t, m, cmd())
-	if want := `Answer 4 "No" to 1.a?`; !strings.Contains(footer(m), want) {
+	if want := `Answer 1.a with y (other key cancels): 4 "No"`; !strings.Contains(footer(m), want) {
 		t.Fatalf("footer %q, want %q", footer(m), want)
 	}
 	m, cmd = update(t, m, key("y"))
