@@ -94,7 +94,8 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// IsSwitchboardCommand reports whether a hook command runs `switchboard hook`, with any path.
+// IsSwitchboardCommand reports whether a hook command runs `switchboard hook` or `swb hook`,
+// with any path.
 func IsSwitchboardCommand(cmd string) bool {
 	rest, ok := strings.CutSuffix(strings.TrimSpace(cmd), " hook")
 	if !ok {
@@ -102,7 +103,8 @@ func IsSwitchboardCommand(cmd string) bool {
 	}
 	rest = strings.TrimSpace(rest)
 	rest = strings.Trim(rest, `'"`)
-	return filepath.Base(rest) == "switchboard"
+	base := filepath.Base(rest)
+	return base == "switchboard" || base == "swb"
 }
 
 // hookEntry is one command hook in the settings.

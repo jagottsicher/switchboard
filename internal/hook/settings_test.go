@@ -116,8 +116,8 @@ func TestMergeRejectsInvalidSettings(t *testing.T) {
 }
 
 func TestIsSwitchboardCommand(t *testing.T) {
-	yes := []string{"switchboard hook", "/home/u/go/bin/switchboard hook", "'/my dir/switchboard' hook", "  switchboard hook  "}
-	no := []string{"switchboard notify", "/opt/other hook", "switchboard-hook", "echo switchboard hook x"}
+	yes := []string{"switchboard hook", "/home/u/go/bin/switchboard hook", "'/my dir/switchboard' hook", "  switchboard hook  ", "swb hook", "/home/u/.local/bin/swb hook"}
+	no := []string{"switchboard notify", "/opt/other hook", "switchboard-hook", "echo switchboard hook x", "swbx hook"}
 	for _, c := range yes {
 		if !IsSwitchboardCommand(c) {
 			t.Errorf("IsSwitchboardCommand(%q) = false", c)
