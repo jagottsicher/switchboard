@@ -238,6 +238,10 @@ func TestAttachRefusesOwnAndDeadSessions(t *testing.T) {
 	if _, cmd := update(t, m, key("enter")); cmd == nil {
 		t.Error("attach to 3.ok was refused")
 	}
+	m, _ = update(t, m, key("g"))
+	if cmd := m.startPeek(); cmd != nil {
+		t.Error("the overview reads its own screen")
+	}
 	if !strings.Contains(m.View(), "1.self (here)") {
 		t.Error("own session is not marked")
 	}
@@ -302,5 +306,24 @@ func TestListError(t *testing.T) {
 	m, _ := update(t, New(""), sessionsMsg{err: screen.ErrNotInstalled})
 	if !strings.Contains(m.View(), screen.ErrNotInstalled.Error()) {
 		t.Error("error not shown")
+	}
+}
+
+func TestKeysArrivingTogetherAreHandledOneByOne(t *testing.T) {
+	setup(t)
+	m := loaded(t, "", plain("1.a"), plain("2.b"), plain("3.c"), plain("4.dab"))
+	m, _ = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jj")})
+	if m.selected != "3.c" {
+		t.Errorf("after jj: selected = %q, want 3.c", m.selected)
+	}
+	m, _ = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/ab")})
+	if m.mode != modeFilter || m.filter != "ab" {
+		t.Errorf("after /ab: mode = %v, filter = %q", m.mode, m.filter)
+	}
+	// A paste in the list is not a series of commands.
+	m, _ = update(t, m, key("esc"))
+	m, cmd := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("qq"), Paste: true})
+	if isQuit(cmd) || m.mode != modeList {
+		t.Error("a paste was taken as commands")
 	}
 }

@@ -221,7 +221,7 @@ func (m *Model) selectionChanged(before string) tea.Cmd {
 // startPeek reads the selected session now.
 func (m *Model) startPeek() tea.Cmd {
 	s, ok := m.current()
-	if !ok {
+	if !ok || (m.self != "" && s.ID == m.self) {
 		return nil
 	}
 	m.peekSeq++
@@ -261,7 +261,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if m.peekBusy == 0 {
-			return m, m.startPeek()
+			cmd := m.startPeek()
+			return m, cmd
 		}
 		return m, nil
 
@@ -269,7 +270,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.seq != m.peekSeq {
 			return m, nil
 		}
-		return m, m.startPeek()
+		cmd := m.startPeek()
+		return m, cmd
 
 	case peekMsg:
 		m.peekBusy = max(m.peekBusy-1, 0)
@@ -285,7 +287,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setStatus("Sent to "+msg.id+".", false)
-		return m, tea.Batch(refreshCmd(), m.startPeek())
+		cmd := tea.Batch(refreshCmd(), m.startPeek())
+		return m, cmd
 
 	case attachedMsg:
 		if msg.err != nil {
@@ -294,9 +297,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("Back from "+msg.id+".", false)
 		}
 		m.refreshing = true
-		return m, tea.Batch(refreshCmd(), m.startPeek())
+		cmd := tea.Batch(refreshCmd(), m.startPeek())
+		return m, cmd
 
 	case tea.KeyMsg:
+		// Over ssh, several keys typed quickly can arrive as one message. In the list, each
+		// of them is a command of its own; once one opens an input, the rest is typed there.
+		if m.mode == modeList && msg.Type == tea.KeyRunes && len(msg.Runes) > 1 && !msg.Paste {
+			var model tea.Model = m
+			var cmds []tea.Cmd
+			for _, r := range msg.Runes {
+				var cmd tea.Cmd
+				model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+				cmds = append(cmds, cmd)
+			}
+			return model, tea.Batch(cmds...)
+		}
 		switch m.mode {
 		case modeFilter:
 			return m.updateFilter(msg)
@@ -317,7 +333,8 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = min(max(to, 0), len(m.visible)-1)
 		m.selected = m.visible[m.cursor].ID
 		m.clampOffset()
-		return m, m.selectionChanged(before)
+		cmd := m.selectionChanged(before)
+		return m, cmd
 	}
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -345,18 +362,21 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.agentsOnly = !m.agentsOnly
 		m.applyView()
 		m.clampOffset()
-		return m, m.selectionChanged(before)
+		cmd := m.selectionChanged(before)
+		return m, cmd
 	case "/":
 		m.mode = modeFilter
 		m.input.SetValue(m.filter)
 		m.input.CursorEnd()
-		return m, m.input.Focus()
+		cmd := m.input.Focus()
+		return m, cmd
 	case "esc":
 		if m.filter != "" {
 			m.filter = ""
 			m.applyView()
 			m.clampOffset()
-			return m, m.selectionChanged(before)
+			cmd := m.selectionChanged(before)
+			return m, cmd
 		}
 		m.setStatus("", false)
 		return m, nil
@@ -372,7 +392,8 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeSend
 		m.sendTarget = s
 		m.input.SetValue("")
-		return m, m.input.Focus()
+		cmd := m.input.Focus()
+		return m, cmd
 	case "enter":
 		s, ok := m.current()
 		if !ok {
@@ -416,14 +437,16 @@ func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter = ""
 		m.applyView()
 		m.clampOffset()
-		return m, m.selectionChanged(before)
+		cmd := m.selectionChanged(before)
+		return m, cmd
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.filter = m.input.Value()
 	m.applyView()
 	m.clampOffset()
-	return m, tea.Batch(cmd, m.selectionChanged(before))
+	cmd = tea.Batch(cmd, m.selectionChanged(before))
+	return m, cmd
 }
 
 func (m Model) updateSend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

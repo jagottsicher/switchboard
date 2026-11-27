@@ -68,7 +68,9 @@ the selected session and follows it live. The overview refreshes every two secon
 If switchboard itself runs inside screen, the session it runs in is marked `(here)` and cannot be
 attached. From an attached session you come back with `Ctrl-a a d`, because the first `Ctrl-a`
 goes to the outer screen. Over ssh, start the overview with `ssh -t host switchboard`; without a
-terminal it exits with an error.
+terminal it exits with an error. A command given to ssh runs without your interactive shell setup,
+so aliases do not apply there and the binary has to be in the `PATH` of a non-interactive shell,
+or you call it with its full path.
 
 ### Commands
 

@@ -199,6 +199,8 @@ func (m Model) peekView(rows int) string {
 	var lines []string
 	switch {
 	case !ok:
+	case m.self != "" && s.ID == m.self:
+		lines = []string{styleDim.Render("This is the session the overview runs in.")}
 	case m.peekID != s.ID:
 		lines = []string{styleDim.Render("Reading the screen …")}
 	case m.peekErr != nil:
