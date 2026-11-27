@@ -143,7 +143,7 @@ func (r *Remote) start() error {
 		}
 		line = l
 	case <-time.After(helloTimeout):
-		return r.fail(fmt.Errorf("%w: %s: no answer within %s", ErrOffline, r.name, helloTimeout))
+		return r.fail(fmt.Errorf("%s: %w: no answer within %s", r.name, ErrOffline, helloTimeout))
 	}
 	var h hello
 	if err := json.Unmarshal(line, &h); err != nil || h.Switchboard != "switchboard" {
@@ -185,7 +185,7 @@ func (r *Remote) fail(err error) error {
 	var exit *exec.ExitError
 	switch {
 	case errors.As(waitErr, &exit) && exit.ExitCode() == 255:
-		return fmt.Errorf("%w: %s: %s", ErrOffline, r.name, msg)
+		return fmt.Errorf("%s: %w: %s", r.name, ErrOffline, msg)
 	case errors.As(waitErr, &exit) && exit.ExitCode() == 127:
 		return fmt.Errorf("%s: switchboard not found as %q (exit 127); set binary for this host "+
 			"in the config, for example ~/.local/bin/switchboard", r.name, r.binary)
@@ -233,7 +233,7 @@ func (r *Remote) call(req request) (response, error) {
 		}
 		line = l
 	case <-time.After(callTimeout):
-		return response{}, r.fail(fmt.Errorf("%w: %s: no answer within %s", ErrOffline, r.name, callTimeout))
+		return response{}, r.fail(fmt.Errorf("%s: %w: no answer within %s", r.name, ErrOffline, callTimeout))
 	}
 	var resp response
 	if err := json.Unmarshal(line, &resp); err != nil || resp.ID != req.ID {

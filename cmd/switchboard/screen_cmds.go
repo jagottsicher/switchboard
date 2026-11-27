@@ -7,35 +7,41 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/jagottsicher/switchboard/internal/config"
+	"github.com/jagottsicher/switchboard/internal/host"
 	"github.com/jagottsicher/switchboard/internal/screen"
 	"github.com/jagottsicher/switchboard/internal/sessions"
 	"github.com/jagottsicher/switchboard/internal/state"
 )
 
 func newListCmd() *cobra.Command {
-	var asJSON, agentsOnly bool
+	var asJSON, agentsOnly, all bool
+	var hostNames []string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List screen sessions with the status of their agents",
-		Args:  cobra.NoArgs,
+		Long: "Lists the screen sessions of this machine with the status of their agents. With\n" +
+			"--host, it lists the sessions of configured hosts instead; with --all, those of this\n" +
+			"machine and all configured hosts. Sessions of other hosts are shown as HOST:SESSION.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := state.Open("")
+			hosts, err := listHosts(hostNames, all)
 			if err != nil {
 				return err
 			}
-			infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true, Self: os.Getenv("STY")})
-			if err != nil {
-				return err
-			}
-			if warn != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warn)
+			defer closeAll(hosts)
+			infos, problems := host.ListAll(hosts)
+			for _, p := range problems {
+				if !p.Warn && len(hosts) == 1 {
+					return p.Err
+				}
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", p.Err)
 			}
 			if agentsOnly {
 				filtered := infos[:0]
@@ -48,6 +54,9 @@ func newListCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if asJSON {
+				if infos == nil {
+					infos = []sessions.Info{}
+				}
 				enc := json.NewEncoder(out)
 				enc.SetIndent("", "  ")
 				return enc.Encode(infos)
@@ -71,34 +80,75 @@ func newListCmd() *cobra.Command {
 					since = sessions.Age(s.Agent.UpdatedAt)
 				}
 				msg := sessions.Shorten(s.Message, 60)
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, screenState, status, since, msg)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.Key(), screenState, status, since, msg)
 			}
 			return tw.Flush()
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	cmd.Flags().BoolVarP(&agentsOnly, "agents", "a", false, "show only sessions with agents")
+	cmd.Flags().StringSliceVar(&hostNames, "host", nil, "list the sessions of this configured host (repeatable)")
+	cmd.Flags().BoolVar(&all, "all", false, "list the sessions of this machine and all configured hosts")
 	return cmd
 }
 
-// findWithWindow resolves query to a session and picks the window: the --window flag if given,
-// otherwise the window an agent hook reported, otherwise window 0.
-func findWithWindow(cmd *cobra.Command, query string, flagWindow int) (screen.Session, int, error) {
-	s, err := screen.Find(query)
+// listHosts returns the hosts that list shows: this machine, the named hosts, or all.
+func listHosts(names []string, all bool) ([]host.Host, error) {
+	if len(names) == 0 && !all {
+		return []host.Host{host.NewLocal()}, nil
+	}
+	cfg, err := config.Load()
 	if err != nil {
-		return s, 0, err
+		return nil, err
 	}
-	if cmd.Flags().Changed("window") {
-		return s, flagWindow, nil
+	if all {
+		return append([]host.Host{host.NewLocal()}, host.FromConfig(cfg)...), nil
 	}
-	if store, err := state.Open(""); err == nil {
-		if rec, ok, _ := store.Get(s.ID); ok && rec.Window != "" {
-			if w, err := strconv.Atoi(rec.Window); err == nil {
-				return s, w, nil
-			}
+	var hosts []host.Host
+	for _, n := range names {
+		h, ok := cfg.Host(n)
+		if !ok {
+			return nil, unknownHost(n)
+		}
+		hosts = append(hosts, host.NewRemote(h.Name, h.SSH, h.Binary))
+	}
+	return hosts, nil
+}
+
+func unknownHost(name string) error {
+	path, _ := config.Path()
+	return fmt.Errorf("no host %q in %s", name, path)
+}
+
+func closeAll(hosts []host.Host) {
+	for _, h := range hosts {
+		h.Close()
+	}
+}
+
+// target resolves "[HOST:]SESSION" to its host, the session and the window: the --window flag
+// if given, otherwise the window an agent reported, otherwise window 0. A prefix that is not a
+// configured host belongs to the session name. The caller closes the host.
+func target(cmd *cobra.Command, query string, flagWindow int) (host.Host, screen.Session, int, error) {
+	var h host.Host = host.NewLocal()
+	if name, rest, ok := strings.Cut(query, ":"); ok && name != "" {
+		cfg, err := config.Load()
+		if err != nil {
+			return nil, screen.Session{}, 0, err
+		}
+		if hc, ok := cfg.Host(name); ok {
+			h, query = host.NewRemote(hc.Name, hc.SSH, hc.Binary), rest
 		}
 	}
-	return s, flagWindow, nil
+	s, window, err := h.Find(query)
+	if err != nil {
+		h.Close()
+		return nil, s, 0, err
+	}
+	if cmd.Flags().Changed("window") {
+		window = flagWindow
+	}
+	return h, s, window, nil
 }
 
 func newPeekCmd() *cobra.Command {
@@ -108,11 +158,12 @@ func newPeekCmd() *cobra.Command {
 		Short: "Show the last screen lines of a session without attaching",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, window, err := findWithWindow(cmd, args[0], window)
+			h, s, window, err := target(cmd, args[0], window)
 			if err != nil {
 				return err
 			}
-			content, err := screen.Hardcopy(s.ID, window)
+			defer h.Close()
+			content, err := h.Hardcopy(s.ID, window, true)
 			if err != nil {
 				return err
 			}
@@ -150,11 +201,12 @@ func newSendCmd() *cobra.Command {
 			if text == "" && noEnter {
 				return errors.New("nothing to send: no text and --no-enter")
 			}
-			s, window, err := findWithWindow(cmd, args[0], window)
+			h, s, window, err := target(cmd, args[0], window)
 			if err != nil {
 				return err
 			}
-			return screen.Stuff(s.ID, window, text, !noEnter)
+			defer h.Close()
+			return h.Stuff(s.ID, window, text, !noEnter)
 		},
 	}
 	cmd.Flags().BoolVar(&noEnter, "no-enter", false, "do not press Enter after the text")
@@ -162,11 +214,18 @@ func newSendCmd() *cobra.Command {
 	return cmd
 }
 
-// execAttach replaces the running process with screen. Swappable for tests.
+// execAttach replaces the running process with the attach command: screen, or ssh for a session
+// on another host. Swappable for tests.
 var execAttach = func(args, env []string) error {
 	path, err := exec.LookPath(args[0])
 	if err != nil {
-		return screen.ErrNotInstalled
+		if args[0] == "screen" {
+			return screen.ErrNotInstalled
+		}
+		return fmt.Errorf("%s not found in PATH", args[0])
+	}
+	if env == nil {
+		env = os.Environ()
 	}
 	return syscall.Exec(path, args, env)
 }
@@ -177,15 +236,17 @@ func newAttachCmd() *cobra.Command {
 		Short: "Attach to a session (screen -x, detach again with Ctrl-a d)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := screen.Find(args[0])
+			h, s, _, err := target(cmd, args[0], 0)
 			if err != nil {
 				return err
 			}
+			h.Close()
 			if screen.InsideScreen() {
 				fmt.Fprintln(cmd.ErrOrStderr(), "Note: switchboard itself runs inside screen. "+
 					"Ctrl-a goes to the outer screen; reach the inner session with Ctrl-a a.")
 			}
-			return execAttach(screen.AttachArgs(s.ID), screen.AttachEnv())
+			attach := h.AttachCmd(s.ID)
+			return execAttach(attach.Args, attach.Env)
 		},
 	}
 }

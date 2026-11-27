@@ -22,14 +22,15 @@ func newAnswerCmd() *cobra.Command {
 			"dialog that is open at that moment; the confirmation names its question.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, window, err := findWithWindow(cmd, args[0], window)
+			h, s, window, err := target(cmd, args[0], window)
 			if err != nil {
 				return err
 			}
+			defer h.Close()
 			if s.State == screen.StateDead {
 				return fmt.Errorf("%s is dead; screen -wipe removes it", s.ID)
 			}
-			d, err := answer.Read(s.ID, window)
+			d, err := h.ReadDialog(s.ID, window)
 			if err != nil {
 				return fmt.Errorf("%s: %w", s.ID, err)
 			}
@@ -48,10 +49,14 @@ func newAnswerCmd() *cobra.Command {
 				return err
 			}
 			label := d.Options[n-1]
-			if err := answer.Send(s.ID, window, n, label, d.Fingerprint); err != nil {
+			if err := h.SendChoice(s.ID, window, n, label, d.Fingerprint); err != nil {
 				return fmt.Errorf("%s: %w", s.ID, err)
 			}
-			fmt.Fprintf(out, "Answered %s: %d. %s\n", s.ID, n, label)
+			key := s.ID
+			if h.Name() != "" {
+				key = h.Name() + ":" + s.ID
+			}
+			fmt.Fprintf(out, "Answered %s: %d. %s\n", key, n, label)
 			if d.Question != "" {
 				fmt.Fprintf(out, "Question: %s\n", d.Question)
 			}
