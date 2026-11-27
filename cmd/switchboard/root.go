@@ -18,6 +18,7 @@ func newRootCmd() *cobra.Command {
 		Version:      version,
 		SilenceUsage: true,
 	}
-	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAttachCmd(), newNewCmd())
+	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAttachCmd(), newNewCmd(),
+		newHookCmd(), newNotifyCmd(), newHooksCmd())
 	return root
 }

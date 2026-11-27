@@ -13,8 +13,9 @@ need a daemon.
 
 ## Status
 
-Early development. The commands below work; agent status detection, the TUI and multi-host
-support are not implemented yet (see [Roadmap](#roadmap)).
+Early development. The commands below work, including agent status from hooks. Status
+detection from the screen contents, the TUI and multi-host support are not implemented yet (see
+[Roadmap](#roadmap)).
 
 ## Requirements
 
@@ -34,14 +35,56 @@ your `PATH`.
 ## Usage
 
 ```sh
-switchboard list [--json]                      # list all screen sessions
+switchboard list [-a] [--json]                 # sessions with agent status; -a: agents only
 switchboard peek SESSION [-n 40] [-w WINDOW]   # show the last lines without attaching
 switchboard send SESSION "text" [--no-enter]   # type text and press Enter; "-" reads stdin
 switchboard attach SESSION                     # screen -x; detach again with Ctrl-a d
-switchboard new NAME [-C DIR] -- COMMAND...    # start a command in a new detached session
+switchboard new NAME [-C DIR] -- COMMAND...    # start an agent in a new detached session
+switchboard notify [--status S] "text"         # report status/message from inside a session
+switchboard hooks print|install|uninstall      # manage the agent hooks
 ```
 
-`SESSION` is the full screen ID (`12345.name`), the PID, or a unique session name.
+`SESSION` is the full screen ID (`12345.name`), the PID, or a unique session name. `peek` and
+`send` use the window an agent reported, unless `-w` is given.
+
+`list` sorts sessions that need attention first. The status of an agent is one of:
+
+| Status | Meaning |
+|---|---|
+| `waiting` | The agent needs input or a permission decision. |
+| `working` | The agent is busy. |
+| `idle` | The agent has finished its turn. |
+| `exited` | The agent session has ended. |
+| `unknown` | The session is marked as an agent, but nothing has been reported yet. |
+
+## Agent status
+
+switchboard learns the status of an agent from hooks that the agent runs on its events. Each
+hook calls `switchboard hook`, which stores the event for the screen session it runs in (taken
+from `$STY` and `$WINDOW`). The hook never prints anything, always exits with status 0 and does
+not call screen, so it cannot block or slow down the agent. Problems are logged to `hook.log` in
+the state directory (`$XDG_STATE_HOME/switchboard`, by default `~/.local/state/switchboard`).
+
+Hooks are currently provided for Claude Code. To set them up, run this on every machine where
+your agents run:
+
+```sh
+switchboard hooks install
+```
+
+It shows what it is going to change, asks for confirmation, writes a backup and merges the hooks
+into the user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`).
+Existing hooks and settings stay as they are; running it again replaces older switchboard entries
+instead of adding duplicates. Use `switchboard hooks print` to see the settings without changing
+anything, and `switchboard hooks uninstall` to remove them. Running agents usually pick up the
+change on their own; otherwise restart them.
+
+Other agents and scripts can report their status with `switchboard notify`:
+
+```sh
+switchboard notify --status waiting "Need a decision on the schema"
+switchboard notify --status idle "Build finished"
+```
 
 The typical setup is to log in to the machine that runs your agents via ssh and start
 switchboard there.
@@ -53,11 +96,13 @@ switchboard there.
   characters and other symbols outside Latin-1 are shown garbled.
 - `send` escapes the characters screen interprets (`\`, `^`, `$`) and splits long text into
   chunks, because screen silently drops `stuff` arguments longer than about 760 bytes.
+- When you interrupt an agent with Esc or deny a permission, the agent sends no final event, so
+  its status may stay at `working` or `waiting`. Detecting this from the screen contents is
+  planned.
 
 ## Roadmap
 
-1. Agent status (working, waiting for input, idle, exited) from agent hooks, with a fallback
-   that analyzes the screen contents.
+1. A fallback that derives the agent status from the screen contents.
 2. A terminal UI with a live overview, peek, send and attach.
 3. Several hosts in one overview via ssh.
 4. Controlled access for other developers to shared sessions.
