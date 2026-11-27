@@ -13,6 +13,11 @@ import (
 // A hardcopy of screen 4.09 turns "❯" into "o", so the input line starts with "o" and a no-break
 // space. Lines of the transcript start with "❯" or "o" and a normal space, and shell prompts
 // use normal spaces as well, so the no-break space is what identifies the input line.
+//
+// The agent's screen must also end with one of its own lines: the input line, an indented
+// footer line, or the line offering "Esc to cancel". Agent output shown secondhand, by peek in
+// a shell or in the preview of the overview, is followed by a prompt or a help line at the left
+// edge and is not taken for an agent.
 
 const claudeCodeName = "claude-code"
 
@@ -34,6 +39,9 @@ func claudeCode(lines []string) (Result, bool) {
 		}
 	}
 	last := tail[len(tail)-1]
+	if !isInputLine(last) && !strings.HasPrefix(last, " ") && !strings.Contains(last, "Esc to cancel") {
+		return Result{}, false
+	}
 
 	if input && strings.Contains(strings.Join(footer, "\n"), "esc to interrupt") {
 		return Result{Agent: claudeCodeName, Status: state.StatusWorking}, true

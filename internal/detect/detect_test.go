@@ -95,3 +95,20 @@ func TestDialogIgnoresListsAboveIt(t *testing.T) {
 		t.Errorf("Detect() = %+v, %v", got, ok)
 	}
 }
+
+// Agent output shown secondhand, by peek in a shell or in the preview of the overview, must not
+// make that session an agent.
+func TestSecondhandAgentScreensAreNotRecognized(t *testing.T) {
+	for _, name := range []string{"idle", "working", "utf8-working", "permission"} {
+		for follow, line := range map[string]string{
+			"shell prompt":  "user@host:~$ ",
+			"overview help": "enter attach  s send  / filter  a agents  r refresh  q quit  (back: Ctrl-a a d)",
+			"overview msg":  "Sent to 123.agent.",
+		} {
+			lines := append(fixture(t, name), "", line)
+			if got, ok := Detect(lines); ok {
+				t.Errorf("%s followed by %s: recognized as %+v", name, follow, got)
+			}
+		}
+	}
+}

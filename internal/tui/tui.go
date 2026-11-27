@@ -27,7 +27,7 @@ var (
 		if err != nil {
 			return nil, nil, err
 		}
-		infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true})
+		infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true, Self: os.Getenv("STY")})
 		return infos, warn, err
 	}
 	hardcopy  = screen.Hardcopy

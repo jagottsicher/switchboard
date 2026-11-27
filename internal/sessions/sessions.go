@@ -62,6 +62,9 @@ type Options struct {
 	Prune bool
 	// Detect reads the visible screen of each session and recognizes agents on it.
 	Detect bool
+	// Self is the session switchboard runs in ($STY), if any. Its screen is not read: it may
+	// show another agent's screen.
+	Self string
 }
 
 // Collect lists the screen sessions together with their stored state, sorted so that sessions
@@ -89,7 +92,7 @@ func Collect(store *state.Store, opts Options) (infos []Info, warn error, err er
 	}
 	var detected []*detect.Result
 	if opts.Detect {
-		detected = detectAll(infos)
+		detected = detectAll(infos, opts.Self)
 	}
 	for i := range infos {
 		var d *detect.Result
@@ -111,12 +114,12 @@ func Collect(store *state.Store, opts Options) (infos []Info, warn error, err er
 
 // detectAll reads the visible screen of every live session and runs the detector on it. Read
 // errors only mean that nothing is detected for that session.
-func detectAll(infos []Info) []*detect.Result {
+func detectAll(infos []Info, self string) []*detect.Result {
 	out := make([]*detect.Result, len(infos))
 	sem := make(chan struct{}, parallelReads)
 	var wg sync.WaitGroup
 	for i, info := range infos {
-		if info.State == screen.StateDead {
+		if info.State == screen.StateDead || (self != "" && info.ID == self) {
 			continue
 		}
 		wg.Add(1)
@@ -138,7 +141,8 @@ func detectAll(infos []Info) []*detect.Result {
 }
 
 // resolve sets Status, Message and Detected of info from the stored record and what the screen
-// shows. A dead session is exited. A recent hook event wins, because the screen lags behind it;
+// shows. A dead session is exited, and so is an agent that reported its end. A recent hook
+// event wins, because the screen lags behind it;
 // otherwise a recognized screen wins, which covers changes that send no hook event, such as an
 // interrupt with Esc or a denied permission. Without either, the record decides.
 func resolve(info *Info, d *detect.Result) {
@@ -150,6 +154,9 @@ func resolve(info *Info, d *detect.Result) {
 		if rec != nil {
 			info.Message = rec.Message
 		}
+	case rec != nil && rec.Status == state.StatusExited:
+		info.Status = state.StatusExited
+		info.Message = rec.Message
 	case d != nil && (rec == nil || rec.Status == "" || now().Sub(rec.UpdatedAt) > hookGrace):
 		info.Status = d.Status
 		info.Message = ""

@@ -30,7 +30,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true})
+			infos, warn, err := sessions.Collect(store, sessions.Options{Prune: true, Detect: true, Self: os.Getenv("STY")})
 			if err != nil {
 				return err
 			}

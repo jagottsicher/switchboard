@@ -150,6 +150,7 @@ func TestResolve(t *testing.T) {
 		{"long thinking stays working", false, rec(state.StatusWorking, time.Minute, ""), det(state.StatusWorking, ""), state.StatusWorking, ""},
 		{"nothing detected keeps the record", false, rec(state.StatusWaiting, time.Hour, "Need a decision"), nil, state.StatusWaiting, "Need a decision"},
 		{"marked agent without hook", false, &state.Record{Agent: true}, det(state.StatusIdle, ""), state.StatusIdle, ""},
+		{"reported end wins", false, rec(state.StatusExited, time.Minute, "Session ended: prompt_input_exit"), det(state.StatusIdle, ""), state.StatusExited, "Session ended: prompt_input_exit"},
 		{"dead wins", true, rec(state.StatusWorking, time.Hour, "x"), det(state.StatusIdle, ""), state.StatusExited, "x"},
 		{"plain session", false, nil, nil, "", ""},
 	}
@@ -169,7 +170,7 @@ func TestResolve(t *testing.T) {
 
 func TestCollectDetectsAgentsOnScreen(t *testing.T) {
 	store, _ := state.Open(t.TempDir())
-	fakeScreens(t, []screen.Session{{ID: "1.agent"}, {ID: "2.shell"}, {ID: "3.dead", State: screen.StateDead}}, nil)
+	fakeScreens(t, []screen.Session{{ID: "1.agent"}, {ID: "2.shell"}, {ID: "3.dead", State: screen.StateDead}, {ID: "4.self"}}, nil)
 	orig := readScreen
 	t.Cleanup(func() { readScreen = orig })
 	var read []string
@@ -183,7 +184,7 @@ func TestCollectDetectsAgentsOnScreen(t *testing.T) {
 		}
 		return []string{"$ "}, nil
 	}
-	infos, _, err := Collect(store, Options{Detect: true})
+	infos, _, err := Collect(store, Options{Detect: true, Self: "4.self"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,8 +198,8 @@ func TestCollectDetectsAgentsOnScreen(t *testing.T) {
 		}
 	}
 	for _, id := range read {
-		if id == "3.dead" {
-			t.Error("the screen of a dead session was read")
+		if id == "3.dead" || id == "4.self" {
+			t.Errorf("the screen of %s was read", id)
 		}
 	}
 }
