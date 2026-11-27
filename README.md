@@ -14,8 +14,8 @@ need a daemon.
 ## Status
 
 Early development. The interactive overview and the commands below work, including agent status
-from hooks and from the screen contents. Multi-host support is not implemented yet (see
-[Roadmap](#roadmap)).
+from hooks and from the screen contents, answering agent dialogs, and sessions on other machines
+reached over ssh.
 
 ## Requirements
 
@@ -52,7 +52,8 @@ Packages, once there are any, will install `swb` as a link.
 ### Interactive overview
 
 Run `switchboard` (or `swb`) without a command to open the overview. The upper part lists all
-screen sessions, with agents that wait for input at the top. The lower part shows the screen of
+screen sessions of this machine and of the [configured hosts](#several-hosts), with agents that
+wait for input at the top. The lower part shows the screen of
 the selected session and follows it live. The overview refreshes every two seconds.
 
 | Key | Action |
@@ -81,7 +82,7 @@ or you call it with its full path.
 ### Commands
 
 ```sh
-switchboard list [-a] [--json]                 # sessions with agent status; -a: agents only
+switchboard list [-a] [--json] [--all|--host H] # sessions with agent status; -a: agents only
 switchboard peek SESSION [-n 40] [-w WINDOW]   # show the last lines without attaching
 switchboard send SESSION "text" [--no-enter]   # type text and press Enter; "-" reads stdin
 switchboard answer SESSION [CHOICE]            # pick a dialog choice by its label, e.g. "No"
@@ -89,9 +90,11 @@ switchboard attach SESSION                     # screen -x; detach again with Ct
 switchboard new NAME [-C DIR] -- COMMAND...    # start an agent in a new detached session
 switchboard notify [--status S] "text"         # report status/message from inside a session
 switchboard hooks print|install|uninstall      # manage the agent hooks
+switchboard hosts check                        # check the configured hosts
 ```
 
-`SESSION` is the full screen ID (`12345.name`), the PID, or a unique session name. `peek`,
+`SESSION` is the full screen ID (`12345.name`), the PID, or a unique session name. For a
+session on a configured host, put the host name in front: `HOST:SESSION`. `peek`,
 `send` and `answer` use the window an agent reported, unless `-w` is given.
 
 `answer` without a choice prints the question and the choices of the dialog. With a choice, it
@@ -109,6 +112,37 @@ at that moment, which may be a newer one than you listed; the output names its q
 | `idle` | The agent has finished its turn. |
 | `exited` | The agent session has ended. |
 | `unknown` | The session is marked as an agent, but nothing has been reported yet, or one of its menus is open. |
+
+## Several hosts
+
+switchboard can show and control the sessions of other machines that you reach with ssh. List
+them in `~/.config/switchboard/config.toml` (or `$XDG_CONFIG_HOME/switchboard/config.toml`):
+
+```toml
+[[host]]
+name = "agents"                     # name in switchboard, as in agents:SESSION
+ssh = "agents.example.org"          # host alias for ssh; defaults to name
+binary = "~/.local/bin/switchboard" # switchboard on that machine; defaults to switchboard
+```
+
+On every host:
+
+1. Install the same version of switchboard as on your machine. Both ends check that they speak
+   the same protocol and tell you if they do not.
+2. Set `binary` to its path, unless `switchboard` is in the `PATH` of a non-interactive shell
+   there. A command run over ssh does not read your interactive shell setup, so `~/.local/bin`
+   or `~/go/bin` are often missing from it.
+3. Run `switchboard hooks install` there, so the agents on that host report their status.
+
+Then check the setup with `switchboard hosts check`. The overview shows the sessions of all hosts
+together; `list --all` does the same on the command line, and `list --host NAME` shows one host.
+
+switchboard runs the system `ssh` with only the host alias, so your `~/.ssh/config` applies with
+its user, port, keys and jump hosts. The connection must work without a password prompt, for
+example with a key in your ssh agent. One ssh connection per host stays open while the overview
+runs; switchboard starts `switchboard serve --stdio` there and exchanges JSON over it. Attaching
+to a remote session runs `ssh -t HOST screen -x SESSION` and shares that connection. A host that
+cannot be reached is marked offline and tried again after 30 seconds.
 
 ## Agent status
 
@@ -177,18 +211,19 @@ tested with Claude Code 2.1; other versions may need adjustments.
   window wraps the choices of a dialog so that they cannot be read, and to choices beyond 9.
 - In a narrow window, a wrapped question whose continuation starts with a capital letter, such
   as a file name, is shown only from that line on. The choices are not affected.
+- The age of a status is computed with the clock of the machine that shows it, so clocks that
+  differ between hosts shift the ages of remote sessions.
 
 ## Roadmap
 
 1. More ways to talk to agents from the overview, such as free-text answers to questions and
    notifications when an agent starts waiting.
-2. Several hosts in one overview via ssh.
-3. Controlled access for other developers to shared sessions.
+2. Controlled access for other developers to shared sessions.
 
 ## Security
 
 Access to an agent's terminal means running code as that agent's user. Anyone who can send input
-to a session can do whatever that user can do.
+to a session can do whatever that user can do. See [SECURITY.md](SECURITY.md).
 
 ## License
 
