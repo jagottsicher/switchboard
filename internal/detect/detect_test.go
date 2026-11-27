@@ -130,6 +130,7 @@ func TestDialogJoinsWrappedQuestions(t *testing.T) {
 		{"stops at other indentation", []string{"  Bash command", " Do you want to proceed?", " ❯ 1. Yes", "   2. No"}, "Do you want to proceed?"},
 		{"stops at control characters", []string{" \x10 Drink", " Tea or coffee?", " ❯ 1. Tea", "   2. Coffee"}, "Tea or coffee?"},
 		{"at most three lines", []string{" a", " b", " c", " d", " e?", " ❯ 1. Yes", "   2. No"}, "b c d e?"},
+		{"new sentence", []string{" Bash command", " touch x.txt", " Do you want to proceed?", " ❯ 1. Yes", "   2. No"}, "Do you want to proceed?"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

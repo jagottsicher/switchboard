@@ -5,8 +5,8 @@ A control room for coding agents running in GNU screen sessions.
 If you run several coding agents, each in its own `screen` session, you usually have to detach
 from one and attach to the next just to find out whether an agent is still working or waiting
 for your input. switchboard gives you one overview instead: it lists your sessions, shows what is
-on their screens without attaching, types input into them, and attaches with `screen -x` when you
-need full interaction.
+on their screens without attaching, types input into them, answers their dialogs, and attaches
+with `screen -x` when you need full interaction.
 
 switchboard builds on GNU screen. It is not a terminal multiplexer of its own, and it does not
 need a daemon.
@@ -60,10 +60,16 @@ the selected session and follows it live. The overview refreshes every two secon
 | `↑`/`↓`, `k`/`j`, `g`/`G` | Select a session |
 | `enter` | Attach with `screen -x`; detach with `Ctrl-a d` to come back to the overview |
 | `s` | Type a line and send it to the selected session with Enter; an empty line sends only Enter |
+| `1`–`9` | Answer the dialog of a waiting agent with that choice, after confirming its label with `y` |
 | `/` | Filter by session name, status, directory or message; `esc` clears the filter |
 | `a` | Show only agents, or all sessions |
 | `r` | Refresh now |
 | `q` | Quit |
+
+Answering reads the dialog again from the screen and asks, for example, `Answer 4 "No" to
+12345.name?`. Only `y` sends the choice; any other key cancels. Before the choice is sent, the
+screen is read once more, and if it no longer shows the same dialog, nothing is sent. The key
+help shows `1-N answer` when the selected session waits in a dialog whose choices could be read.
 
 If switchboard itself runs inside screen, the session it runs in is marked `(here)` and cannot be
 attached. From an attached session you come back with `Ctrl-a a d`, because the first `Ctrl-a`
@@ -78,14 +84,20 @@ or you call it with its full path.
 switchboard list [-a] [--json]                 # sessions with agent status; -a: agents only
 switchboard peek SESSION [-n 40] [-w WINDOW]   # show the last lines without attaching
 switchboard send SESSION "text" [--no-enter]   # type text and press Enter; "-" reads stdin
+switchboard answer SESSION [CHOICE]            # pick a dialog choice by its label, e.g. "No"
 switchboard attach SESSION                     # screen -x; detach again with Ctrl-a d
 switchboard new NAME [-C DIR] -- COMMAND...    # start an agent in a new detached session
 switchboard notify [--status S] "text"         # report status/message from inside a session
 switchboard hooks print|install|uninstall      # manage the agent hooks
 ```
 
-`SESSION` is the full screen ID (`12345.name`), the PID, or a unique session name. `peek` and
-`send` use the window an agent reported, unless `-w` is given.
+`SESSION` is the full screen ID (`12345.name`), the PID, or a unique session name. `peek`,
+`send` and `answer` use the window an agent reported, unless `-w` is given.
+
+`answer` without a choice prints the question and the choices of the dialog. With a choice, it
+picks the choice with exactly that label, regardless of case, and sends its digit without Enter.
+Numbers are not accepted: the agent acts on a digit at once, and the numbers differ between
+dialogs. A label that is not offered, or a screen that changed in between, sends nothing.
 
 `list` sorts sessions that need attention first. The status of an agent is one of:
 
@@ -95,7 +107,7 @@ switchboard hooks print|install|uninstall      # manage the agent hooks
 | `working` | The agent is busy. |
 | `idle` | The agent has finished its turn. |
 | `exited` | The agent session has ended. |
-| `unknown` | The session is marked as an agent, but nothing has been reported yet. |
+| `unknown` | The session is marked as an agent, but nothing has been reported yet, or one of its menus is open. |
 
 ## Agent status
 
@@ -158,13 +170,15 @@ tested with Claude Code 2.1; other versions may need adjustments.
 - Without hooks, switchboard does not know which window of a session runs the agent and reads
   window 0.
 - The choices of a dialog depend on the dialog: "No" is option 3 when creating a file but
-  option 4 for a shell command. The trust dialog has no numbers and preselects "No, exit", so a
-  bare Enter quits the agent. A digit picks its choice at once, without confirmation. To answer
-  a dialog by hand, check its choices with `peek` first and use `send --no-enter`.
+  option 4 for a shell command. This is why `answer` and the overview go by the label.
+- The trust dialog has no numbers and preselects "No, exit", so a bare Enter quits the agent. It
+  cannot be answered from switchboard; attach to answer it. The same applies when a very narrow
+  window wraps the choices of a dialog so that they cannot be read, and to choices beyond 9.
 
 ## Roadmap
 
-1. Answering agent dialogs from the overview.
+1. More ways to talk to agents from the overview, such as free-text answers to questions and
+   notifications when an agent starts waiting.
 2. Several hosts in one overview via ssh.
 3. Controlled access for other developers to shared sessions.
 

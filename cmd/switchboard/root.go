@@ -56,7 +56,7 @@ func newRootCmd() *cobra.Command {
 			return runTUI()
 		},
 	}
-	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAttachCmd(), newNewCmd(),
+	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAnswerCmd(), newAttachCmd(), newNewCmd(),
 		newHookCmd(), newNotifyCmd(), newHooksCmd())
 	return root
 }
