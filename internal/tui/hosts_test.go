@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jagottsicher/switchboard/internal/answer"
+	"github.com/jagottsicher/switchboard/internal/config"
 	"github.com/jagottsicher/switchboard/internal/sessions"
 	"github.com/jagottsicher/switchboard/internal/state"
 )
@@ -118,5 +119,38 @@ func TestRefreshSkipsHostsStillReading(t *testing.T) {
 	collectMsgs(m.refreshAll())
 	if strings.Join(asked, ",") != ",lab" && strings.Join(asked, ",") != "lab," {
 		t.Errorf("asked %q, want this machine and lab", asked)
+	}
+}
+
+func TestBrokenConfigKeepsTheLocalOverview(t *testing.T) {
+	orig := loadConfig
+	t.Cleanup(func() { loadConfig = orig })
+	loadConfig = func() (config.Config, error) {
+		return config.Config{}, errors.New("config.toml: unknown setting host.binery")
+	}
+	m, hosts := newFromConfig("")
+	if len(hosts) != 0 || len(m.hosts) != 1 || m.hosts[0] != "" {
+		t.Errorf("hosts = %v, model hosts = %q", hosts, m.hosts)
+	}
+	if !m.statusErr || !strings.Contains(m.status, "binery") {
+		t.Errorf("status = %q", m.status)
+	}
+}
+
+func TestConfiguredHostsAreRegistered(t *testing.T) {
+	orig := loadConfig
+	t.Cleanup(func() {
+		loadConfig = orig
+		delete(registry, "box")
+	})
+	loadConfig = func() (config.Config, error) {
+		return config.Config{Hosts: []config.Host{{Name: "box"}}}, nil
+	}
+	m, hosts := newFromConfig("")
+	if len(hosts) != 1 || strings.Join(m.hosts, ",") != ",box" {
+		t.Fatalf("hosts = %v, model hosts = %q", hosts, m.hosts)
+	}
+	if h, err := lookup("box"); err != nil || h.Name() != "box" {
+		t.Errorf("lookup(box) = %v, %v", h, err)
 	}
 }

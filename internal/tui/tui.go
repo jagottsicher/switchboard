@@ -188,22 +188,37 @@ func New(self string, hosts ...string) Model {
 	}
 }
 
+// loadConfig is swappable for tests.
+var loadConfig = config.Load
+
 // Run starts the overview on the terminal with this machine and the configured hosts, and
 // returns when the user quits.
 func Run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	var names []string
-	for _, h := range host.FromConfig(cfg) {
-		registry[h.Name()] = h
-		names = append(names, h.Name())
+	m, hosts := newFromConfig(os.Getenv("STY"))
+	for _, h := range hosts {
 		defer h.Close()
 	}
-	p := tea.NewProgram(New(os.Getenv("STY"), names...), tea.WithAltScreen())
-	_, err = p.Run()
+	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
+}
+
+// newFromConfig returns the model for this machine and the configured hosts and registers the
+// hosts. A configuration that cannot be read leaves only this machine, with the error in the
+// status line, so a typo in the file never keeps the overview from starting.
+func newFromConfig(self string) (Model, []host.Host) {
+	cfg, err := loadConfig()
+	if err != nil {
+		m := New(self)
+		m.setStatus(err.Error(), true)
+		return m, nil
+	}
+	hosts := host.FromConfig(cfg)
+	var names []string
+	for _, h := range hosts {
+		registry[h.Name()] = h
+		names = append(names, h.Name())
+	}
+	return New(self, names...), hosts
 }
 
 func (m Model) Init() tea.Cmd {

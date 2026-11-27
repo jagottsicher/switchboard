@@ -128,6 +128,9 @@ func (r *Remote) start() error {
 	}
 	stderr := &bytes.Buffer{}
 	cmd.Stderr = &limitedWriter{buf: stderr, max: 4096}
+	// A background ssh master (ControlPersist) must not keep Wait from returning by holding a
+	// pipe open.
+	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("%s: starting ssh: %w", r.name, err)
 	}
