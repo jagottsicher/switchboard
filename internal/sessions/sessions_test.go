@@ -152,6 +152,12 @@ func TestResolve(t *testing.T) {
 		{"marked agent without hook", false, &state.Record{Agent: true}, det(state.StatusIdle, ""), state.StatusIdle, ""},
 		{"reported end wins", false, rec(state.StatusExited, time.Minute, "Session ended: prompt_input_exit"), det(state.StatusIdle, ""), state.StatusExited, "Session ended: prompt_input_exit"},
 		{"dead wins", true, rec(state.StatusWorking, time.Hour, "x"), det(state.StatusIdle, ""), state.StatusExited, "x"},
+		{"fresh dialog shows the question", false, rec(state.StatusWaiting, time.Second, "Permission requested: Write"), det(state.StatusWaiting, "Do you want to create x?"), state.StatusWaiting, "Do you want to create x?"},
+		{"fresh dialog without question keeps the hook message", false, rec(state.StatusWaiting, time.Second, "Permission requested: Write"), det(state.StatusWaiting, ""), state.StatusWaiting, "Permission requested: Write"},
+		{"menu replaces a stale record", false, rec(state.StatusWaiting, 30*time.Second, "stale"), det(state.StatusUnknown, ""), state.StatusUnknown, ""},
+		{"menu during a fresh run", false, rec(state.StatusWorking, time.Second, ""), det(state.StatusUnknown, ""), state.StatusWorking, ""},
+		{"menu alone is no agent", false, nil, det(state.StatusUnknown, ""), "", ""},
+		{"menu on a session that is no agent", false, &state.Record{Status: state.StatusIdle, UpdatedAt: base.Add(-time.Minute)}, det(state.StatusUnknown, ""), state.StatusIdle, ""},
 		{"plain session", false, nil, nil, "", ""},
 	}
 	for _, tt := range tests {
@@ -163,6 +169,9 @@ func TestResolve(t *testing.T) {
 			resolve(&info, tt.det)
 			if info.Status != tt.status || info.Message != tt.message {
 				t.Errorf("resolve() = %s %q, want %s %q", info.Status, info.Message, tt.status, tt.message)
+			}
+			if tt.det != nil && tt.det.Status == state.StatusUnknown && (tt.rec == nil || !tt.rec.Agent) && info.IsAgent() {
+				t.Error("a menu alone marked the session as an agent")
 			}
 		})
 	}

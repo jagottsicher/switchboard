@@ -8,7 +8,9 @@ import (
 
 // Claude Code shows an input line that starts with "❯" and a no-break space, with a footer
 // below it. While it works, the footer says "esc to interrupt". A dialog (permission, question,
-// trust) replaces input line and footer and ends with a line that offers "Esc to cancel".
+// trust) replaces input line and footer and ends with a line that offers "Esc to cancel". A
+// permission dialog also offers "Tab to amend", which identifies it even when a very narrow
+// window wraps its choices beyond recognition.
 //
 // A hardcopy of screen 4.09 turns "❯" into "o", so the input line starts with "o" and a no-break
 // space. Lines of the transcript start with "❯" or "o" and a normal space, and shell prompts
@@ -18,6 +20,10 @@ import (
 // footer line, or the line offering "Esc to cancel". Agent output shown secondhand, by peek in
 // a shell or in the preview of the overview, is followed by a prompt or a help line at the left
 // edge and is not taken for an agent.
+//
+// Menus such as /config, /model or /permissions replace the input line as well and end with an
+// indented line offering "Esc to cancel", "Esc to close" or "Esc to go back". They can be opened
+// while the agent works, so they say nothing about its state and are reported as unknown.
 
 const claudeCodeName = "claude-code"
 
@@ -49,12 +55,29 @@ func claudeCode(lines []string) (Result, bool) {
 	if strings.Contains(last, "Esc to cancel") {
 		question, options := dialog(tail[:len(tail)-1])
 		if (question != "" && len(options) >= 2) ||
-			strings.Contains(last, "Enter to confirm") || strings.Contains(last, "Enter to select") {
+			strings.Contains(last, "Enter to confirm") || strings.Contains(last, "Enter to select") ||
+			strings.Contains(last, "Tab to amend") {
 			return Result{Agent: claudeCodeName, Status: state.StatusWaiting, Question: question, Options: options}, true
 		}
 	}
 	if input {
 		return Result{Agent: claudeCodeName, Status: state.StatusIdle}, true
 	}
+	if isMenuLine(last) {
+		return Result{Agent: claudeCodeName, Status: state.StatusUnknown}, true
+	}
 	return Result{}, false
+}
+
+// isMenuLine reports whether l is the help line at the bottom of one of the agent's menus.
+func isMenuLine(l string) bool {
+	if !strings.HasPrefix(l, " ") {
+		return false
+	}
+	for _, s := range []string{"Esc to cancel", "Esc to close", "Esc to go back"} {
+		if strings.Contains(l, s) {
+			return true
+		}
+	}
+	return false
 }

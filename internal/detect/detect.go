@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jagottsicher/switchboard/internal/state"
 )
@@ -75,9 +76,48 @@ func dialog(lines []string) (question string, options []string) {
 	}
 	for i := first - 1; i >= 0 && i >= first-4; i-- {
 		if l := strings.TrimSpace(lines[i]); strings.HasSuffix(l, "?") {
-			question = l
+			question = joinWrapped(lines[:i], lines[i])
 			break
 		}
 	}
 	return question, options
+}
+
+// joinWrapped returns line together with the lines it continues. A narrow window wraps a long
+// question, so its beginning ends up on the lines above. A line belongs to it if it has the
+// same indentation and is plain text that neither ends a sentence nor is an item of a numbered
+// list. At most three lines above are taken.
+func joinWrapped(above []string, line string) string {
+	text := strings.TrimSpace(line)
+	indent := indentation(line)
+	for i := len(above) - 1; i >= 0 && i >= len(above)-3; i-- {
+		l := above[i]
+		t := strings.TrimSpace(l)
+		if t == "" || indentation(l) != indent || !plainText(t) || strings.ContainsAny(t[len(t)-1:], ".:?!") ||
+			optionLine.MatchString(l) {
+			break
+		}
+		text = t + " " + text
+	}
+	return text
+}
+
+func indentation(l string) int {
+	return len(l) - len(strings.TrimLeft(l, " "))
+}
+
+// plainText reports whether t is ordinary text: no control characters and not a rule drawn
+// from one repeated character.
+func plainText(t string) bool {
+	runes := []rune(t)
+	same := true
+	for _, r := range runes {
+		if r < 0x20 || r == 0x7f || r == utf8.RuneError {
+			return false
+		}
+		if r != runes[0] {
+			same = false
+		}
+	}
+	return !same || len(runes) < 3
 }

@@ -142,11 +142,21 @@ func detectAll(infos []Info, self string) []*detect.Result {
 
 // resolve sets Status, Message and Detected of info from the stored record and what the screen
 // shows. A dead session is exited, and so is an agent that reported its end. A recent hook
-// event wins, because the screen lags behind it;
-// otherwise a recognized screen wins, which covers changes that send no hook event, such as an
-// interrupt with Esc or a denied permission. Without either, the record decides.
+// event wins, because the screen lags behind it. Otherwise a recognized screen wins, which
+// covers changes that send no hook event, such as an interrupt with Esc or a denied permission.
+// Without either, the record decides.
+//
+// An open menu of the agent is detected as unknown. It only replaces a stale record, so that a
+// status left behind by an interrupt does not stay on screen; on its own, it does not mark a
+// session as an agent.
+//
+// While the agent waits, the question of its dialog is the message, because it says more than
+// the hook messages and stays the same while hook events arrive.
 func resolve(info *Info, d *detect.Result) {
 	rec := info.Agent
+	if d != nil && d.Status == state.StatusUnknown && (rec == nil || !rec.Agent) {
+		d = nil
+	}
 	info.Detected = d
 	switch {
 	case info.State == screen.StateDead:
@@ -169,6 +179,9 @@ func resolve(info *Info, d *detect.Result) {
 	case rec != nil:
 		info.Status = rec.Status
 		info.Message = rec.Message
+		if rec.Status == state.StatusWaiting && d != nil && d.Status == state.StatusWaiting && d.Question != "" {
+			info.Message = d.Question
+		}
 	}
 }
 
