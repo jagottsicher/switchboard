@@ -80,14 +80,17 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# Commits are listed in the order git shows them, newest first, with short hashes. Merge commits,
+# including the release merge into main, are left out.
 changelog:
   use: git
-  sort: asc
+  abbrev: 7
   filters:
     exclude:
       - "^Merge pull request"
       - "^Merge branch"
       - "^Merge remote-tracking branch"
+      - "^Release v"
       - "^Initial commit$"
       - "^test"
 
