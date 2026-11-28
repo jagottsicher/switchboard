@@ -180,3 +180,64 @@ func TestPruneKeepsRecordsNewerThanTheListing(t *testing.T) {
 		t.Errorf("after Prune: %v", all)
 	}
 }
+
+func TestAnnotateKeepsTheStatusTime(t *testing.T) {
+	ts := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	fixedNow(t, ts)
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update("1.a", func(r *Record) { r.Status = StatusWorking }); err != nil {
+		t.Fatal(err)
+	}
+	fixedNow(t, ts.Add(time.Minute))
+	limits := []Limit{{Window: "5h", UsedPercent: 42.5, ResetsAt: ts.Add(time.Hour)}}
+	if err := s.Annotate("1.a", func(r *Record) bool { r.Limits = limits; return true }); err != nil {
+		t.Fatal(err)
+	}
+	rec, _, _ := s.Get("1.a")
+	if !rec.UpdatedAt.Equal(ts) || rec.Status != StatusWorking || !SameLimits(rec.Limits, limits) {
+		t.Errorf("record = %+v", rec)
+	}
+
+	// Nothing is written when fn reports no change.
+	path := s.recordPath("1.a")
+	before, _ := os.Stat(path)
+	time.Sleep(10 * time.Millisecond)
+	if err := s.Annotate("1.a", func(r *Record) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.Stat(path); !after.ModTime().Equal(before.ModTime()) {
+		t.Error("record was written without a change")
+	}
+
+	// A new record gets no status time.
+	if err := s.Annotate("2.b", func(r *Record) bool { r.Agent = true; return true }); err != nil {
+		t.Fatal(err)
+	}
+	if rec, ok, _ := s.Get("2.b"); !ok || !rec.UpdatedAt.IsZero() || rec.Status != StatusUnknown {
+		t.Errorf("new record = %+v, %v", rec, ok)
+	}
+}
+
+func TestLimitHelpers(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	limits := []Limit{
+		{Window: "5h", UsedPercent: 79.9, ResetsAt: now.Add(-time.Second)},
+		{Window: "7d", UsedPercent: 90, ResetsAt: now.Add(time.Hour)},
+		{Window: "x", UsedPercent: 1},
+	}
+	active := ActiveLimits(limits, now)
+	if len(active) != 2 || active[0].Window != "7d" || active[1].Window != "x" {
+		t.Errorf("ActiveLimits() = %+v", active)
+	}
+	if limits[0].Percent() != 79 || limits[1].Percent() != 90 {
+		t.Errorf("Percent() = %d, %d", limits[0].Percent(), limits[1].Percent())
+	}
+	same := []Limit{limits[0], limits[1], limits[2]}
+	same[1].ResetsAt = same[1].ResetsAt.In(time.FixedZone("x", 3600))
+	if !SameLimits(limits, same) || SameLimits(limits, limits[:2]) {
+		t.Error("SameLimits() is wrong")
+	}
+}

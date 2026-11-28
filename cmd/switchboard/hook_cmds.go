@@ -29,6 +29,29 @@ func newHookCmd() *cobra.Command {
 	}
 }
 
+func newStatusLineCmd() *cobra.Command {
+	var then string
+	cmd := &cobra.Command{
+		Use:   "statusline [--then COMMAND]",
+		Short: "Record the agent's usage limits (called by the agent as its status line command)",
+		Long: "Runs as the agent's status line command. It reads the status line input as JSON on\n" +
+			"stdin and stores the usage limits of the account for the screen session in $STY.\n" +
+			"With --then, it runs COMMAND with the same input and prints its output; otherwise it\n" +
+			"prints the usage limits. hooks install sets this up and keeps an existing status line\n" +
+			"command as COMMAND.",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Run: func(cmd *cobra.Command, _ []string) {
+			if code := hook.RunStatusLine(os.Stdin, os.Stdout, os.Stderr, os.Getenv, then); code != 0 {
+				os.Exit(code)
+			}
+		},
+	}
+	cmd.Flags().StringVar(&then, "then", "", "status line command to run with the same input")
+	return cmd
+}
+
 func newNotifyCmd() *cobra.Command {
 	var statusFlag, session, window string
 	cmd := &cobra.Command{
@@ -164,7 +187,7 @@ func newHooksInstallCmd(remove bool) *cobra.Command {
 				return nil
 			}
 			if remove {
-				fmt.Fprintf(w, "This removes all switchboard hooks from %s.\n", path)
+				fmt.Fprintf(w, "This removes all switchboard hooks and its status line command from %s.\n", path)
 			} else {
 				fmt.Fprintf(w, "This adds hooks for %d events to %s:\n", len(hook.Events), path)
 				names := make([]string, len(hook.Events))
@@ -172,6 +195,8 @@ func newHooksInstallCmd(remove bool) *cobra.Command {
 					names[i] = ev.Name
 				}
 				fmt.Fprintf(w, "  %s\n  command: %s\n", strings.Join(names, ", "), c)
+				fmt.Fprintf(w, "It also sets the status line command to %s statusline, which records\n", strings.TrimSuffix(c, " hook"))
+				fmt.Fprintln(w, "the usage limits of the account; an existing status line command keeps running through it.")
 				fmt.Fprintln(w, "Existing hooks and other settings stay unchanged; older switchboard entries are replaced.")
 			}
 			backup := ""

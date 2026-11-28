@@ -107,6 +107,59 @@ func IsSwitchboardCommand(cmd string) bool {
 	return base == "switchboard" || base == "swb"
 }
 
+// StatusLineCommand returns the status line command for the switchboard of hookCommand, a command
+// that ends in " hook". If then is not empty, the status line command runs it and passes its
+// output through.
+func StatusLineCommand(hookCommand, then string) string {
+	c := strings.TrimSuffix(strings.TrimSpace(hookCommand), " hook") + " statusline"
+	if then != "" {
+		c += " --then " + shellQuote(then)
+	}
+	return c
+}
+
+// parseStatusLineCommand reports whether cmd is a status line command of switchboard, with any
+// path, and returns the command it passes through.
+func parseStatusLineCommand(cmd string) (then string, ok bool) {
+	cmd = strings.TrimSpace(cmd)
+	i := strings.Index(cmd, " statusline")
+	if i < 0 {
+		return "", false
+	}
+	base := filepath.Base(strings.Trim(strings.TrimSpace(cmd[:i]), `'"`))
+	if base != "switchboard" && base != "swb" {
+		return "", false
+	}
+	rest := cmd[i+len(" statusline"):]
+	if rest == "" {
+		return "", true
+	}
+	arg, found := strings.CutPrefix(rest, " --then ")
+	if !found {
+		return "", false
+	}
+	then, ok = shellUnquote(strings.TrimSpace(arg))
+	return then, ok
+}
+
+// shellUnquote reverses shellQuote.
+func shellUnquote(s string) (string, bool) {
+	if s == "" {
+		return "", false
+	}
+	if shellQuote(s) == s {
+		return s, true
+	}
+	if len(s) < 2 || s[0] != '\'' || s[len(s)-1] != '\'' {
+		return "", false
+	}
+	out := strings.ReplaceAll(s[1:len(s)-1], `'\''`, "'")
+	if shellQuote(out) != s {
+		return "", false
+	}
+	return out, true
+}
+
 // hookEntry is one command hook in the settings.
 type hookEntry struct {
 	Type    string `json:"type"`
@@ -142,7 +195,60 @@ func Snippet(command string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return indent(object{{Key: "hooks", Value: hooksRaw}})
+	sl, err := json.Marshal(statusLine{Type: "command", Command: StatusLineCommand(command, "")})
+	if err != nil {
+		return nil, err
+	}
+	return indent(object{{Key: "hooks", Value: hooksRaw}, {Key: "statusLine", Value: sl}})
+}
+
+// statusLine is the status line setting as switchboard writes it.
+type statusLine struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
+// mergeStatusLine sets the status line command of switchboard in root, or removes it if remove is
+// set. A status line command of the user is kept: switchboard's command runs it and passes its
+// output through, and removing switchboard's command puts it back. Other status line settings,
+// such as padding, stay as they are.
+func mergeStatusLine(root object, hookCommand string, remove bool) (object, error) {
+	sl := object{}
+	then, ours := "", false
+	if raw, ok := root.get("statusLine"); ok {
+		var err error
+		if sl, err = parseObject(raw); err != nil {
+			return nil, fmt.Errorf(`"statusLine" is not a JSON object: %w`, err)
+		}
+		var cmd string
+		if c, ok := sl.get("command"); ok {
+			if err := json.Unmarshal(c, &cmd); err != nil {
+				return nil, fmt.Errorf("statusLine.command: %w", err)
+			}
+		}
+		if then, ours = parseStatusLineCommand(cmd); !ours {
+			then = cmd
+		}
+	}
+	str := func(v string) json.RawMessage {
+		raw, _ := json.Marshal(v)
+		return raw
+	}
+	switch {
+	case remove && !ours:
+		return root, nil
+	case remove && then == "":
+		return root.del("statusLine"), nil
+	case remove:
+		sl = sl.set("command", str(then))
+	default:
+		sl = sl.set("type", str("command")).set("command", str(StatusLineCommand(hookCommand, then)))
+	}
+	raw, err := sl.marshal()
+	if err != nil {
+		return nil, err
+	}
+	return root.set("statusLine", raw), nil
 }
 
 // Merge returns settings with all switchboard hooks removed and, unless remove is set, added again
@@ -196,6 +302,9 @@ func Merge(settings []byte, command string, remove bool) (out []byte, changed bo
 		}
 	}
 
+	if root, err = mergeStatusLine(root, command, remove); err != nil {
+		return nil, false, err
+	}
 	if len(hooks) == 0 {
 		root = root.del("hooks")
 	} else {
