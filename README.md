@@ -133,32 +133,42 @@ switchboard is deliberately built for GNU screen only, and does not support tmux
 
 ## Installation
 
+### Release binaries
+
+Every [release](https://github.com/jagottsicher/switchboard/releases) has ready-made binaries for
+Linux (amd64, arm64, ARMv7, ARMv6), macOS (amd64, arm64), FreeBSD (amd64, ARMv7), OpenBSD and
+NetBSD (amd64, arm64). Download the archive for your platform, check it and put the binary into a
+directory in your `PATH`:
+
 ```sh
-go install github.com/jagottsicher/switchboard/cmd/switchboard@develop
+sha256sum -c --ignore-missing checksums.txt
+tar xzf switchboard_*_linux_amd64.tar.gz
+install -m 0755 switchboard ~/.local/bin/
+```
+
+To update, do the same with a newer release.
+
+### From source
+
+```sh
+go install github.com/jagottsicher/switchboard/cmd/switchboard@latest
 ```
 
 The binary ends up in `$(go env GOPATH)/bin`, usually `~/go/bin`. Make sure that directory is in
-your `PATH`. To install it somewhere else, such as `~/.local/bin`, set `GOBIN`:
+your `PATH`. To install it somewhere else, such as `~/.local/bin`, set `GOBIN`. To get the current
+development state instead of the latest release, use `@develop`:
 
 ```sh
 GOBIN=~/.local/bin go install github.com/jagottsicher/switchboard/cmd/switchboard@develop
 ```
 
-Run the same command again to update.
-
-Until the first release, the default branch has no Go module yet, and the Go checksum database
-cannot verify it. If `go install` fails with `verifying go.mod … 404 Not Found`, tell Go to fetch
-switchboard directly from GitHub and to skip that check:
-
-```sh
-GOPRIVATE=github.com/jagottsicher/switchboard go install github.com/jagottsicher/switchboard/cmd/switchboard@develop
-```
+Run the same command again to update. `switchboard --version` shows which version you have.
 
 ### Short name `swb`
 
 `swb` is the short name for switchboard. It is the same program: every command works the same
-way under both names, and the help shows the name you used. `go install` only creates
-`switchboard`, so add the short name yourself, either as a link next to the binary or as a shell
+way under both names, and the help shows the name you used. Neither the archives nor `go install`
+create it, so add the short name yourself, either as a link next to the binary or as a shell
 alias:
 
 ```sh
@@ -166,8 +176,7 @@ ln -s switchboard "$(dirname "$(command -v switchboard)")/swb"  # works in scrip
 alias swb=switchboard                                        # interactive shells only
 ```
 
-The link follows the binary, so updating switchboard updates `swb` as well. Packages, once there
-are any, will install `swb` as a link.
+The link follows the binary, so updating switchboard updates `swb` as well.
 
 ## Quick start
 

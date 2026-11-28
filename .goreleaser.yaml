@@ -1,0 +1,127 @@
+# GoReleaser v2 configuration. .github/workflows/release.yml runs it when a v*.*.* tag is pushed.
+# Releases contain one tar.gz archive per platform and a checksum file; there are no packages.
+version: 2
+
+project_name: switchboard
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: switchboard
+    main: ./cmd/switchboard
+    binary: switchboard
+    # Without cgo, every target can be cross-compiled on one Linux runner.
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - freebsd
+      - openbsd
+      - netbsd
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      # ARMv6 is built separately below, for Linux only. ARMv5 is left out.
+      - "7"
+    ignore:
+      - goos: freebsd
+        goarch: arm64
+      # There are no 32-bit ARM Macs.
+      - goos: darwin
+        goarch: arm
+      # Current OpenBSD and NetBSD releases are not run on 32-bit ARM in practice.
+      - goos: openbsd
+        goarch: arm
+      - goos: netbsd
+        goarch: arm
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
+  # ARMv6 for the original Raspberry Pi and the Pi Zero.
+  - id: switchboard-armv6
+    main: ./cmd/switchboard
+    binary: switchboard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - arm
+    goarm:
+      - "6"
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
+archives:
+  - id: switchboard
+    formats: ["tar.gz"]
+    # The ARM version is part of the name, so that the ARMv6 and ARMv7 archives do not collide.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      - SECURITY.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge pull request"
+      - "^Merge branch"
+      - "^Merge remote-tracking branch"
+      - "^Initial commit$"
+      - "^test"
+
+release:
+  github:
+    owner: jagottsicher
+    name: switchboard
+  prerelease: auto
+  mode: replace
+  header: |
+    ## switchboard {{ .Tag }}
+
+    A control room for coding agents running in GNU screen sessions: see their status, look at
+    their screens without attaching, send input, answer their dialogs and attach with
+    `screen -x` when needed.
+
+    ### Installing
+
+    Download the archive for your platform below, extract it and put `switchboard` into a
+    directory in your `PATH`, for example `~/.local/bin`:
+
+    ```sh
+    tar xzf switchboard_*_<os>_<arch>.tar.gz
+    install -m 0755 switchboard ~/.local/bin/
+    ln -sf switchboard ~/.local/bin/swb   # optional short name
+    ```
+
+    Verify a download against `checksums.txt` with `sha256sum -c --ignore-missing checksums.txt`.
+    GNU screen must be installed. To use other machines from the overview, install the same
+    version there as well.
+  footer: |
+    ---
+
+    See the [README](https://github.com/jagottsicher/switchboard/blob/main/README.md) for the
+    way of working with screen, the agent hooks and the setup for several hosts, and
+    [SECURITY.md](https://github.com/jagottsicher/switchboard/blob/main/SECURITY.md) for what
+    access to an agent session means.
