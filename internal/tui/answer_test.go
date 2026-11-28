@@ -34,14 +34,14 @@ func setupAnswer(t *testing.T) *answerFakes {
 	f := &answerFakes{}
 	or, os_ := readDialog, sendChoice
 	t.Cleanup(func() { readDialog, sendChoice = or, os_ })
-	readDialog = func(id string, window int) (answer.Dialog, error) {
+	readDialog = func(hostName, id string, window int) (answer.Dialog, error) {
 		f.reads++
 		if f.err != nil {
 			return answer.Dialog{}, f.err
 		}
 		return answer.Dialog{Question: "Do you want to proceed?", Options: bashOptions, Fingerprint: "fp"}, nil
 	}
-	sendChoice = func(id string, window int, n int, label, fingerprint string) error {
+	sendChoice = func(hostName, id string, window int, n int, label, fingerprint string) error {
 		f.sent = append(f.sent, strings.Join([]string{id, string(rune('0' + n)), label, fingerprint}, "|"))
 		return nil
 	}

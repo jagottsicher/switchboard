@@ -37,15 +37,15 @@ func setup(t *testing.T) *fakes {
 	f := &fakes{}
 	oc, oh, os_, oa := collect, hardcopy, stuff, attachCmd
 	t.Cleanup(func() { collect, hardcopy, stuff, attachCmd = oc, oh, os_, oa })
-	collect = func() ([]sessions.Info, error, error) { return nil, nil, nil }
-	hardcopy = func(id string, window int) ([]string, error) {
+	collect = func(string) ([]sessions.Info, error, error) { return nil, nil, nil }
+	hardcopy = func(hostName, id string, window int) ([]string, error) {
 		return []string{"screen of " + id}, nil
 	}
-	stuff = func(id string, window int, text string, enter bool) error {
+	stuff = func(hostName, id string, window int, text string, enter bool) error {
 		f.sent = append(f.sent, id+":"+text)
 		return nil
 	}
-	attachCmd = func(id string) *exec.Cmd { return exec.Command("true") }
+	attachCmd = func(hostName, id string) *exec.Cmd { return exec.Command("true") }
 	return f
 }
 
@@ -94,14 +94,14 @@ func isQuit(cmd tea.Cmd) bool {
 
 func TestSelectionFollowsSessionAcrossRefresh(t *testing.T) {
 	setup(t)
-	m := loaded(t, "", agent("1.a", state.StatusIdle, ""), agent("2.b", state.StatusWorking, ""))
+	m := loaded(t, "", agent("1.a", state.StatusWorking, ""), agent("2.b", state.StatusIdle, ""))
 	m, _ = update(t, m, key("down"))
 	if m.selected != "2.b" {
 		t.Fatalf("selected = %q", m.selected)
 	}
 	// 2.b now waits and moves to the top; the selection stays on it.
 	m, _ = update(t, m, sessionsMsg{infos: []sessions.Info{
-		agent("2.b", state.StatusWaiting, "Permission requested: Bash"), agent("1.a", state.StatusIdle, ""),
+		agent("2.b", state.StatusWaiting, "Permission requested: Bash"), agent("1.a", state.StatusWorking, ""),
 	}})
 	if m.selected != "2.b" || m.cursor != 0 {
 		t.Errorf("selected = %q, cursor = %d", m.selected, m.cursor)
@@ -131,7 +131,7 @@ func TestStalePeekIsDropped(t *testing.T) {
 func TestPeekReadsTheAgentWindow(t *testing.T) {
 	setup(t)
 	var gotWindow = -1
-	hardcopy = func(id string, window int) ([]string, error) { gotWindow = window; return nil, nil }
+	hardcopy = func(hostName, id string, window int) ([]string, error) { gotWindow = window; return nil, nil }
 	m := loaded(t, "", agent("1.a", state.StatusIdle, ""))
 	cmd := m.startPeek()
 	cmd()

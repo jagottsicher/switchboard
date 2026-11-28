@@ -57,6 +57,6 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAnswerCmd(), newAttachCmd(), newNewCmd(),
-		newHookCmd(), newNotifyCmd(), newHooksCmd())
+		newHookCmd(), newNotifyCmd(), newHooksCmd(), newHostsCmd(), newServeCmd())
 	return root
 }
