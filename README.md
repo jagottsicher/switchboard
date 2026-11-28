@@ -1,6 +1,6 @@
 # switchboard
 
-*Here we go!*
+## *Here we go!*
 
 A control room for coding agents running in GNU screen sessions.
 
