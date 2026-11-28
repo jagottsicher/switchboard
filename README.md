@@ -57,6 +57,8 @@ another machine. Below the list, switchboard shows the screen of the selected se
 - **Look without attaching.** The screen of the selected session is shown live below the list.
   `peek` does the same on the command line.
 - **Type into a session.** Send a line of text, or just Enter, without attaching.
+- **Watch usage limits.** The overview shows how much of the five-hour and the weekly usage limit
+  of the selected agent's account is used, in orange from 80 % and in red from 90 %.
 - **Answer dialogs.** When an agent asks for permission or offers choices, pick one from the
   overview. switchboard asks you to confirm the label and sends nothing if the dialog has changed
   in the meantime.
@@ -199,7 +201,8 @@ Run `switchboard` (or `swb`) without a command to open the overview. The upper p
 screen sessions of this machine and of the [configured hosts](#several-hosts), with agents that
 wait for input at the top. The lower part shows the screen of the selected session and follows it
 live. While you scroll it back with `PgUp`, it pauses and keeps showing the same lines until you
-scroll down to the end again or press `esc`. The list takes at most two fifths of the terminal and scrolls when there are more
+scroll down to the end again or press `esc`. The title line of the view also shows the
+[usage limits](#usage-limits) of the selected agent's account. The list takes at most two fifths of the terminal and scrolls when there are more
 sessions; the rest stays free for the screen. The overview refreshes every two seconds.
 
 | Key | Action |
@@ -286,6 +289,24 @@ instead of adding duplicates. Use `switchboard hooks print` to see the settings 
 anything, and `switchboard hooks uninstall` to remove them. Running agents usually pick up the
 change on their own; otherwise restart them.
 
+### Usage limits
+
+`hooks install` also makes `switchboard statusline` the status line command of the agent. The
+agent runs it whenever its status line is redrawn and passes it the use of the account's usage
+limits: the five-hour window and the weekly window, in percent, with the time each one resets.
+switchboard stores them for the screen session, and the overview shows them in the title line of
+the session view, for example `· 5h 42% · 7d 83%`. From 80 % on a value is shown in orange, from
+90 % in red. A window that has been reset since the agent reported it is left out.
+
+If you already have a status line command, it keeps running: switchboard runs it with the same
+input and passes its output through, and `hooks uninstall` puts it back. Without one, the agent's
+status line shows the same percentages.
+
+The agent reports the limits only for subscription accounts, not for API keys, and only after its
+first response in a session. They belong to the account, so all sessions of one account show the
+same values, and they are only updated while an agent is active. A `statusLine` in a project's
+own settings takes precedence over the user settings that `hooks install` changes.
+
 ### notify
 
 Other agents and scripts report their status with `switchboard notify`, run inside their screen
@@ -353,6 +374,8 @@ held up by it.
   box-drawing characters and other symbols outside Latin-1 are shown garbled.
 - `send` escapes the characters screen interprets (`\`, `^`, `$`) and splits long text into
   chunks, because screen silently drops `stuff` arguments longer than about 760 bytes.
+- Usage limits are only available from Claude Code with a subscription account. Other agents do
+  not make theirs available to other programs.
 - The status from the screen only covers Claude Code so far. Other agents report through
   `switchboard notify`.
 - Without hooks, switchboard does not know which window of a session runs the agent and reads

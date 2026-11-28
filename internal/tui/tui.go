@@ -88,6 +88,9 @@ const (
 	peekDelay = 150 * time.Millisecond
 )
 
+// now is the clock; swappable for tests.
+var now = time.Now
+
 type mode int
 
 const (

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -55,9 +56,59 @@ type Record struct {
 	Message   string    `json:"message,omitempty"`
 	MessageAt time.Time `json:"message_at,omitzero"`
 	// AgentSession is the agent's own session ID from the hook payload.
-	AgentSession string    `json:"agent_session,omitempty"`
-	Cwd          string    `json:"cwd,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AgentSession string `json:"agent_session,omitempty"`
+	Cwd          string `json:"cwd,omitempty"`
+	// Limits is the use of the usage limits of the agent's account, as the agent last reported it.
+	Limits []Limit `json:"limits,omitempty"`
+	// UpdatedAt is the time of the last status report. Reports of usage limits do not change it.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Limit is the use of one usage-limit window of an agent's account, such as the five-hour or the
+// weekly window.
+type Limit struct {
+	// Window names the window as it is shown, for example "5h" or "7d".
+	Window      string  `json:"window"`
+	UsedPercent float64 `json:"used_percent"`
+	// ResetsAt is when the window starts over; zero if it is not known.
+	ResetsAt time.Time `json:"resets_at,omitzero"`
+}
+
+// Thresholds from which the use of a limit is shown as a warning and as critical, in percent.
+const (
+	LimitWarning  = 80
+	LimitCritical = 90
+)
+
+// Percent returns the used share as a whole number, rounded down, so that the number shown and
+// the thresholds agree: 79.6 is shown as 79 and is not a warning yet.
+func (l Limit) Percent() int {
+	return int(math.Floor(l.UsedPercent))
+}
+
+// ActiveLimits returns the limits whose window has not been reset by now. After a reset, the
+// stored use no longer applies.
+func ActiveLimits(limits []Limit, now time.Time) []Limit {
+	var out []Limit
+	for _, l := range limits {
+		if l.ResetsAt.IsZero() || l.ResetsAt.After(now) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// SameLimits reports whether a and b hold the same limits.
+func SameLimits(a, b []Limit) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Window != b[i].Window || a[i].UsedPercent != b[i].UsedPercent || !a[i].ResetsAt.Equal(b[i].ResetsAt) {
+			return false
+		}
+	}
+	return true
 }
 
 // Now returns the current time. Swappable for tests.
@@ -135,6 +186,17 @@ func (s *Store) Get(session string) (rec Record, ok bool, err error) {
 // Update reads the record of session, applies fn and writes it back atomically. A file lock
 // serializes concurrent updates, for example from hooks that fire in quick succession.
 func (s *Store) Update(session string, fn func(*Record)) (Record, error) {
+	return s.update(session, func(r *Record) bool { fn(r); return true }, true)
+}
+
+// Annotate changes the record of session like Update, but it does not count as a status report:
+// UpdatedAt stays as it is. fn reports whether it changed anything; if not, nothing is written.
+func (s *Store) Annotate(session string, fn func(*Record) bool) error {
+	_, err := s.update(session, fn, false)
+	return err
+}
+
+func (s *Store) update(session string, fn func(*Record) bool, report bool) (Record, error) {
 	lock, err := os.OpenFile(s.lockPath(session), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return Record{}, err
@@ -153,9 +215,13 @@ func (s *Store) Update(session string, fn func(*Record)) (Record, error) {
 	if !ok {
 		rec = Record{Session: session, Status: StatusUnknown}
 	}
-	fn(&rec)
+	if !fn(&rec) {
+		return rec, nil
+	}
 	rec.Session = session
-	rec.UpdatedAt = Now()
+	if report {
+		rec.UpdatedAt = Now()
+	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return Record{}, err

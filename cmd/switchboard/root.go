@@ -55,6 +55,6 @@ func newRootCmd() *cobra.Command {
 	}
 	root.SetVersionTemplate("{{.Name}} {{.Version}}\n")
 	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAnswerCmd(), newAttachCmd(), newNewCmd(),
-		newHookCmd(), newNotifyCmd(), newHooksCmd(), newHostsCmd(), newServeCmd())
+		newHookCmd(), newStatusLineCmd(), newNotifyCmd(), newHooksCmd(), newHostsCmd(), newServeCmd())
 	return root
 }

@@ -21,6 +21,9 @@ var (
 	styleError    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	styleKey      = lipgloss.NewStyle().Bold(true)
 
+	styleLimitWarning  = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
+	styleLimitCritical = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+
 	statusStyles = map[state.Status]lipgloss.Style{
 		state.StatusWaiting: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")),
 		state.StatusWorking: lipgloss.NewStyle().Foreground(lipgloss.Color("39")),
@@ -188,24 +191,46 @@ func (m Model) row(s sessions.Info, selected bool, sw, infoW int) string {
 		infoStyle.Render(fit(sessions.Shorten(info, max(infoW, 1)), infoW)), m.width)
 }
 
+// limitsText shows the usage limits of an agent's account for the title of the session view, such
+// as "· 5h 42% · 7d 83% ", with warnings in orange and critical values in red. Windows that have
+// been reset since the agent reported them are left out.
+func limitsText(limits []state.Limit) string {
+	var b strings.Builder
+	for _, l := range state.ActiveLimits(limits, now()) {
+		style := styleDim
+		switch p := l.Percent(); {
+		case p >= state.LimitCritical:
+			style = styleLimitCritical
+		case p >= state.LimitWarning:
+			style = styleLimitWarning
+		}
+		b.WriteString(styleDim.Render("· ") + style.Render(fmt.Sprintf("%s %d%%", l.Window, l.Percent())) + styleDim.Render(" "))
+	}
+	return b.String()
+}
+
 func (m Model) peekView(rows int) string {
 	if rows <= 0 {
 		return ""
 	}
 	var b strings.Builder
 	s, ok := m.current()
-	title := "── "
+	title := styleDim.Render("── ")
 	if ok {
-		title += fmt.Sprintf("%s · window %d ", s.Key(), s.Window())
+		title += styleDim.Render(fmt.Sprintf("%s · window %d ", s.Key(), s.Window()))
+		if s.Agent != nil {
+			title += limitsText(s.Agent.Limits)
+		}
 		switch {
 		case m.peekID != s.Key():
 		case m.peekScroll > 0:
-			title += fmt.Sprintf("· %d lines up, paused (pgdn, esc: live) ", m.peekScroll)
+			title += styleDim.Render(fmt.Sprintf("· %d lines up, paused (pgdn, esc: live) ", m.peekScroll))
 		case len(m.peekLines) > rows-1:
-			title += "· pgup scroll "
+			title += styleDim.Render("· pgup scroll ")
 		}
 	}
-	b.WriteString(styleDim.Render(ansi.Truncate(title+strings.Repeat("─", max(m.width, 0)), max(m.width, 0), "")))
+	title += styleDim.Render(strings.Repeat("─", max(m.width, 0)))
+	b.WriteString(ansi.Truncate(title, max(m.width, 0), ""))
 	b.WriteByte('\n')
 	body := rows - 1
 	var lines []string
