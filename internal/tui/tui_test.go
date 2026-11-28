@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -326,5 +327,66 @@ func TestKeysArrivingTogetherAreHandledOneByOne(t *testing.T) {
 	m, cmd := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("qq"), Paste: true})
 	if isQuit(cmd) || m.mode != modeList {
 		t.Error("a paste was taken as commands")
+	}
+}
+
+func TestSessionViewScrolls(t *testing.T) {
+	setup(t)
+	m := loaded(t, "", agent("1.a", state.StatusIdle, ""), agent("2.b", state.StatusIdle, ""))
+	var lines []string
+	for i := 1; i <= 100; i++ {
+		lines = append(lines, fmt.Sprintf("line %03d", i))
+	}
+	m, _ = update(t, m, peekMsg{id: "1.a", seq: m.peekSeq, lines: lines})
+	if v := m.View(); !strings.Contains(v, "line 100") || strings.Contains(v, "line 050") {
+		t.Fatalf("view does not end at the bottom:\n%s", v)
+	}
+
+	m, _ = update(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	page := m.peekPage()
+	if m.peekScroll != page {
+		t.Fatalf("peekScroll = %d, want %d", m.peekScroll, page)
+	}
+	last := fmt.Sprintf("line %03d", 100-page)
+	if v := m.View(); !strings.Contains(v, last) || strings.Contains(v, "line 100") ||
+		!strings.Contains(v, "lines up, paused") {
+		t.Errorf("scrolled view should end at %s:\n%s", last, v)
+	}
+
+	// While scrolled, new screens do not move the view.
+	m, _ = update(t, m, peekMsg{id: "1.a", seq: m.peekSeq, lines: []string{"new"}})
+	if strings.Contains(m.View(), "new") {
+		t.Error("a new screen replaced the scrolled view")
+	}
+
+	// Scrolling stops at the top.
+	for i := 0; i < 20; i++ {
+		m, _ = update(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	}
+	if v := m.View(); !strings.Contains(v, "line 001") || m.peekScroll != 100-m.peekBody() {
+		t.Errorf("peekScroll = %d at the top:\n%s", m.peekScroll, v)
+	}
+
+	// esc returns to the live view and reads the screen again.
+	m, cmd := update(t, m, key("esc"))
+	if m.peekScroll != 0 || cmd == nil {
+		t.Errorf("esc: peekScroll = %d, cmd = %v", m.peekScroll, cmd)
+	}
+
+	// Another session starts at the bottom.
+	m, _ = update(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	m, _ = update(t, m, key("down"))
+	if m.peekScroll != 0 {
+		t.Errorf("peekScroll = %d after changing the session", m.peekScroll)
+	}
+}
+
+func TestShortScreenDoesNotScroll(t *testing.T) {
+	setup(t)
+	m := loaded(t, "", agent("1.a", state.StatusIdle, ""))
+	m, _ = update(t, m, peekMsg{id: "1.a", seq: m.peekSeq, lines: []string{"only line"}})
+	m, _ = update(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.peekScroll != 0 {
+		t.Errorf("peekScroll = %d for a screen that fits", m.peekScroll)
 	}
 }
