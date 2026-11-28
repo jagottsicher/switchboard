@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -388,5 +389,37 @@ func TestShortScreenDoesNotScroll(t *testing.T) {
 	m, _ = update(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
 	if m.peekScroll != 0 {
 		t.Errorf("peekScroll = %d for a screen that fits", m.peekScroll)
+	}
+}
+
+func TestSessionViewShowsUsageLimits(t *testing.T) {
+	setup(t)
+	ts := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	orig := now
+	t.Cleanup(func() { now = orig })
+	now = func() time.Time { return ts }
+
+	a := agent("1.a", state.StatusIdle, "")
+	a.Agent.Limits = []state.Limit{
+		{Window: "5h", UsedPercent: 42.7, ResetsAt: ts.Add(time.Hour)},
+		{Window: "7d", UsedPercent: 91},
+		{Window: "1d", UsedPercent: 99, ResetsAt: ts.Add(-time.Minute)},
+	}
+	m := loaded(t, "", a)
+	title := ""
+	for _, l := range strings.Split(m.View(), "\n") {
+		if strings.Contains(ansi.Strip(l), "window 1") {
+			title = l
+		}
+	}
+	plainTitle := ansi.Strip(title)
+	if !strings.Contains(plainTitle, "· 5h 42% · 7d 91% ") || strings.Contains(plainTitle, "1d") {
+		t.Errorf("title = %q", plainTitle)
+	}
+	if got := limitsText(a.Agent.Limits[1:2]); got != styleDim.Render("· ")+styleLimitCritical.Render("7d 91%")+styleDim.Render(" ") {
+		t.Errorf("critical limit = %q", got)
+	}
+	if got := limitsText([]state.Limit{{Window: "5h", UsedPercent: 85}}); !strings.Contains(got, styleLimitWarning.Render("5h 85%")) {
+		t.Errorf("warning limit = %q", got)
 	}
 }
