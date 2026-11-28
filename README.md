@@ -119,8 +119,9 @@ switchboard is deliberately built for GNU screen only, and does not support tmux
 - **Nested screen.** If switchboard runs inside screen, its own session is marked `(here)` and
   cannot be attached. From a session attached out of it, you come back with `Ctrl-a a d`,
   because the first `Ctrl-a` goes to the outer screen.
-- **Scrollback.** `peek -n 0` shows the whole scrollback of a session. How much screen keeps is
-  set with `defscrollback` in `~/.screenrc`, for example `defscrollback 10000`.
+- **Scrollback.** `PgUp` in the overview and `peek -n 0` show the scrollback of a session. screen
+  keeps only 100 lines by default; set more with `defscrollback` in `~/.screenrc`, for example
+  `defscrollback 10000`. It applies to windows opened after the change.
 - **Several viewers.** You can attach to the same session from several terminals at once, from
   switchboard or with `screen -x` directly. Everybody types into the same agent.
 
@@ -197,13 +198,15 @@ switchboard still recognizes Claude Code from its screen, and other agents can r
 Run `switchboard` (or `swb`) without a command to open the overview. The upper part lists all
 screen sessions of this machine and of the [configured hosts](#several-hosts), with agents that
 wait for input at the top. The lower part shows the screen of the selected session and follows it
-live. The list takes at most two fifths of the terminal and scrolls when there are more
+live. While you scroll it back with `PgUp`, it pauses and keeps showing the same lines until you
+scroll down to the end again or press `esc`. The list takes at most two fifths of the terminal and scrolls when there are more
 sessions; the rest stays free for the screen. The overview refreshes every two seconds.
 
 | Key | Action |
 |---|---|
 | `↑`/`↓`, `k`/`j`, `g`/`G` | Select a session |
 | `enter` | Attach with `screen -x`; detach with `Ctrl-a d` to come back to the overview |
+| `PgUp`/`PgDn` | Scroll the screen of the selected session back into its scrollback and forward again; `esc` returns to the live screen |
 | `s` | Type a line and send it to the selected session with Enter; an empty line sends only Enter |
 | `1`–`9` | Answer the dialog of a waiting agent with that choice, after confirming its label with `y` |
 | `/` | Filter by session name, status, directory or message; `esc` clears the filter |

@@ -197,6 +197,13 @@ func (m Model) peekView(rows int) string {
 	title := "── "
 	if ok {
 		title += fmt.Sprintf("%s · window %d ", s.Key(), s.Window())
+		switch {
+		case m.peekID != s.Key():
+		case m.peekScroll > 0:
+			title += fmt.Sprintf("· %d lines up, paused (pgdn, esc: live) ", m.peekScroll)
+		case len(m.peekLines) > rows-1:
+			title += "· pgup scroll "
+		}
 	}
 	b.WriteString(styleDim.Render(ansi.Truncate(title+strings.Repeat("─", max(m.width, 0)), max(m.width, 0), "")))
 	b.WriteByte('\n')
@@ -211,7 +218,8 @@ func (m Model) peekView(rows int) string {
 	case m.peekErr != nil:
 		lines = []string{styleError.Render(fit(m.peekErr.Error(), m.width))}
 	default:
-		for _, l := range screen.Tail(m.peekLines, body) {
+		shown := m.peekLines[:max(len(m.peekLines)-m.peekScroll, 0)]
+		for _, l := range screen.Tail(shown, body) {
 			lines = append(lines, fit(clean(l), m.width))
 		}
 	}

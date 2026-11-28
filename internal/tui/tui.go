@@ -159,6 +159,9 @@ type Model struct {
 	peekErr   error
 	peekSeq   int // number of the latest peek request; older answers are dropped
 	peekBusy  int // peek requests still running
+	// peekScroll is how many lines the view of the session is scrolled up. While it is above 0,
+	// the view keeps the screen it shows instead of following the session live.
+	peekScroll int
 
 	hosts      []string                   // names of the hosts; "" is this machine
 	byHost     map[string][]sessions.Info // sessions as collected per host
@@ -361,6 +364,7 @@ func (m *Model) selectionChanged(before string) tea.Cmd {
 	}
 	m.peekSeq++
 	m.peekID, m.peekLines, m.peekErr = "", nil, nil
+	m.peekScroll = 0
 	if m.selected == "" {
 		return nil
 	}
@@ -423,7 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.selectionChanged(before); cmd != nil {
 			return m, cmd
 		}
-		if m.peekBusy == 0 {
+		if m.peekBusy == 0 && m.peekScroll == 0 {
 			cmd := m.startPeek()
 			return m, cmd
 		}
@@ -438,7 +442,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case peekMsg:
 		m.peekBusy = max(m.peekBusy-1, 0)
-		if msg.seq != m.peekSeq || msg.id != m.selected {
+		if msg.seq != m.peekSeq || msg.id != m.selected || m.peekScroll > 0 {
 			return m, nil
 		}
 		m.peekID, m.peekLines, m.peekErr = msg.id, msg.lines, msg.err
@@ -542,9 +546,9 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		return move(m.cursor + 1)
 	case "pgup":
-		return move(m.cursor - m.listHeight())
+		return m.scrollPeek(m.peekPage())
 	case "pgdown":
-		return move(m.cursor + m.listHeight())
+		return m.scrollPeek(-m.peekPage())
 	case "home", "g":
 		return move(0)
 	case "end", "G":
@@ -565,6 +569,9 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd := m.input.Focus()
 		return m, cmd
 	case "esc":
+		if m.peekScroll > 0 {
+			return m.scrollPeek(-m.peekScroll)
+		}
 		if m.filter != "" {
 			m.filter = ""
 			m.applyView()
@@ -604,6 +611,33 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(attachCmd(s.Host, s.ID), func(err error) tea.Msg {
 			return attachedMsg{id: key, err: err}
 		})
+	}
+	return m, nil
+}
+
+// peekBody returns the number of screen lines the view of the selected session shows.
+func (m Model) peekBody() int {
+	_, rows := m.layout()
+	return max(rows-1, 1)
+}
+
+// peekPage is how far one key scrolls the view of the session: a page, minus one line that stays
+// visible for orientation.
+func (m Model) peekPage() int {
+	return max(m.peekBody()-1, 1)
+}
+
+// scrollPeek scrolls the view of the selected session by n lines, up for n > 0. Scrolled back to
+// the bottom, the view follows the session live again.
+func (m Model) scrollPeek(n int) (tea.Model, tea.Cmd) {
+	if m.peekID == "" || m.peekID != m.selected {
+		return m, nil
+	}
+	before := m.peekScroll
+	m.peekScroll = min(max(m.peekScroll+n, 0), max(len(m.peekLines)-m.peekBody(), 0))
+	if before > 0 && m.peekScroll == 0 {
+		cmd := m.startPeek()
+		return m, cmd
 	}
 	return m, nil
 }
