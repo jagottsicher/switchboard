@@ -11,9 +11,6 @@ import (
 	"github.com/jagottsicher/switchboard/internal/tui"
 )
 
-// version is set for release builds via -ldflags "-X main.version=…".
-var version = "dev"
-
 const (
 	longName  = "switchboard"
 	shortName = "swb"
@@ -46,7 +43,7 @@ func newRootCmd() *cobra.Command {
 			"sends them input and attaches with screen -x when needed.\n\n" +
 			"Without a command, it starts the interactive overview.\n" +
 			"swb is the short name: link or copy the binary as swb to use it.",
-		Version:      version,
+		Version:      versionInfo(),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
@@ -56,6 +53,7 @@ func newRootCmd() *cobra.Command {
 			return runTUI()
 		},
 	}
+	root.SetVersionTemplate("{{.Name}} {{.Version}}\n")
 	root.AddCommand(newListCmd(), newPeekCmd(), newSendCmd(), newAnswerCmd(), newAttachCmd(), newNewCmd(),
 		newHookCmd(), newNotifyCmd(), newHooksCmd(), newHostsCmd(), newServeCmd())
 	return root
