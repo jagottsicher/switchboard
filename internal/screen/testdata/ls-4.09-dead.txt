@@ -1,0 +1,6 @@
+There are screens on:
+	36542.sb-fix two	(11/27/26 11:01:54)	(Detached)
+	36539.sb-fix-one	(11/27/26 11:01:54)	(Detached)
+	36545.sb-fix-dead	(11/27/26 08:42:45)	(Dead ???)
+Remove dead screens with 'screen -wipe'.
+3 Sockets in /run/screen/S-user.
